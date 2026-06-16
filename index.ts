@@ -1252,13 +1252,15 @@ startServer(world => {
     const pe = new DefaultPlayerEntity({ player, name: 'Player' });
     pe.spawn(world, spawn);
     // Third-person camera: raise the focus over the head and shift over-the-shoulder
-    // so the crosshair sits in open view, not on the character's head.
-    try {
-      player.camera.setMode(PlayerCameraMode.THIRD_PERSON);
-      player.camera.setOffset({ x: 0, y: 1.0, z: 0 });
-      player.camera.setFilmOffset(2);
-      player.camera.setZoom(1.6);
-    } catch (e) { console.warn('camera setup error', e); }
+    // so the crosshair sits in open view, not on the character's head. Delayed so it
+    // runs AFTER DefaultPlayerEntity's own async camera/cosmetic setup (which resets it).
+    setTimeout(() => {
+      try {
+        player.camera.setMode(PlayerCameraMode.THIRD_PERSON);
+        player.camera.setOffset({ x: 0, y: 1.4, z: 0 });
+        player.camera.setFilmOffset(7);
+      } catch (e) { console.warn('camera setup error', e); }
+    }, 600);
     players.add(player);
     hp.set(player, MAX_HP);
     if (!inventory.has(player)) inventory.set(player, new Map());
