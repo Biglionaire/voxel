@@ -15,6 +15,9 @@ Type=simple
 User=root
 WorkingDirectory=/opt/cubit
 EnvironmentFile=/opt/cubit/deploy/.env
+# The .env's PORT=3001 is for the backend; the game server reads PORT too, so pin
+# it to 8080 here (this line overrides the EnvironmentFile value).
+Environment=PORT=8080
 # toktx (installed by setup.sh under $KTX_HOME=/opt/ktx)
 Environment=PATH=/root/.bun/bin:/opt/ktx/bin:/usr/local/bin:/usr/bin:/bin
 Environment=LD_LIBRARY_PATH=/opt/ktx/lib
