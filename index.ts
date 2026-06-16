@@ -1015,15 +1015,29 @@ startServer(world => {
     for (const d of fx.line) { try { d.despawn(); } catch {} }
     fishingFx.delete(player);
   }
-  // Cast: the bobber is thrown from the rod tip, arcs out to the water, and a line
-  // of beads connects the (moving) rod tip to it for the duration.
+  // Quaternion that rotates the model's local +Z axis onto `dir` (so a z-stretched
+  // model becomes a taut line pointing along dir).
+  const quatToZ = (dx: number, dy: number, dz: number) => {
+    const l = Math.hypot(dx, dy, dz) || 1; const bx = dx / l, by = dy / l, bz = dz / l;
+    if (bz > 0.99999) return { x: 0, y: 0, z: 0, w: 1 };
+    if (bz < -0.99999) return { x: 1, y: 0, z: 0, w: 0 };
+    const cx = -by, cy = bx, w = 1 + bz; // cross((0,0,1), b) = (-by, bx, 0)
+    const ql = Math.hypot(cx, cy, 0, w) || 1;
+    return { x: cx / ql, y: cy / ql, z: 0, w: w / ql };
+  };
+  // Cast: the bobber is thrown from the rod tip, arcs out to the water, and a single
+  // taut line connects the (moving) rod tip to it for the duration.
   function castLine(player: any, pe: PlayerEntity, wx: number, wz: number) {
     clearLine(player);
     const tip0 = rodTipOf(player, pe);
     const water = { x: wx, y: SEA_LEVEL + 1.0, z: wz };
     const bobber = mkFx(0.3); try { bobber?.spawn(world, tip0); } catch {}
-    const line: Entity[] = [];
-    for (let i = 0; i < 8; i++) { const e = mkFx(0.07); if (e) { try { e.spawn(world, tip0); } catch {} line.push(e); } }
+    let lineE: Entity | null = null;
+    try {
+      lineE = new Entity({ name: 'FishLine', modelUri: 'models/items/snowball.gltf', modelScale: { x: 0.025, y: 0.025, z: 1 },
+        rigidBodyOptions: { type: RigidBodyType.KINEMATIC_POSITION }, modelPreferredShape: ColliderShape.NONE });
+      lineE.spawn(world, tip0);
+    } catch {}
     let bpos = { ...tip0 }, t = 0; const throwSteps = 6;
     const iv = setInterval(() => {
       t++;
@@ -1034,12 +1048,16 @@ startServer(world => {
       } else { bpos = water; }                                 // resting on the water
       try { bobber?.setPosition(bpos); } catch {}
       const tip = rodTipOf(player, pe);                         // follow the player if they move
-      for (let i = 0; i < line.length; i++) {
-        const f = (i + 1) / (line.length + 1);
-        try { line[i].setPosition({ x: tip.x + (bpos.x - tip.x) * f, y: tip.y + (bpos.y - tip.y) * f, z: tip.z + (bpos.z - tip.z) * f }); } catch {}
+      if (lineE) {
+        const dx = bpos.x - tip.x, dy = bpos.y - tip.y, dz = bpos.z - tip.z, len = Math.hypot(dx, dy, dz) || 0.01;
+        try {
+          lineE.setPosition({ x: (tip.x + bpos.x) / 2, y: (tip.y + bpos.y) / 2, z: (tip.z + bpos.z) / 2 });
+          lineE.setModelScale({ x: 0.03, y: 0.03, z: len });
+          lineE.setRotation(quatToZ(dx, dy, dz));
+        } catch {}
       }
     }, 50);
-    fishingFx.set(player, { bobber, line, iv });
+    fishingFx.set(player, { bobber, line: lineE ? [lineE] : [], iv });
   }
 
   // A fish leaps out of the water at (wx,wz) and arcs up toward the player as it's reeled in.

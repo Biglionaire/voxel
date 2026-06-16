@@ -8,14 +8,11 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; color: #fff; padding: 24px;
-      display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap;
-      /* Game-style backdrop: drop a real screenshot at /bg.jpg to use it; otherwise this sky→grass scene shows. */
-      background:
-        linear-gradient(180deg, rgba(10,16,28,0.35), rgba(10,16,28,0.7)),
-        url('/bg.jpg') center/cover no-repeat,
-        linear-gradient(180deg, #8ecbff 0%, #b6e0ff 42%, #cfeecb 52%, #6ab04c 60%, #3f7d33 100%);
-      background-blend-mode: normal;
+      display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap; background: #0a101c;
     }
+    /* Blurred game background (bg.png) */
+    body::before { content: ''; position: fixed; inset: -8px; z-index: -1;
+      background: url('/bg.png') center/cover no-repeat; filter: blur(7px) brightness(0.6); transform: scale(1.06); }
     /* floating voxel clouds */
     .cloud { position: fixed; background: rgba(255,255,255,0.85); border-radius: 8px; filter: blur(1px); z-index: 0; box-shadow: 24px 0 0 rgba(255,255,255,0.85), -24px 8px 0 rgba(255,255,255,0.7); }
     .c1 { width: 90px; height: 26px; top: 12%; left: 14%; } .c2 { width: 120px; height: 30px; top: 22%; right: 12%; }
@@ -35,6 +32,10 @@
     input:focus { border-color: #6bc1ff; }
     button.go { width: 100%; margin-top: 20px; padding: 12px; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 800; color: #0e1320; background: linear-gradient(90deg, #ffd56b, #ff9f43); }
     button.go:disabled { opacity: 0.6; cursor: default; }
+    .bigplay { font-size: 21px !important; padding: 17px !important; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(255,159,67,0.5); }
+    .bigplay:hover { filter: brightness(1.06); }
+    .xbtn { display: block; text-align: center; text-decoration: none; margin-top: 10px; padding: 11px; border-radius: 10px; font-weight: 700; font-size: 14px; color: #fff; background: #000; border: 1px solid rgba(255,255,255,0.25); }
+    .xbtn:hover { background: #181818; }
     .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
     .msg.err { color: #ff7a7a; } .msg.ok { color: #7ed957; }
 
@@ -54,8 +55,9 @@
   <div class="card">
     <div class="logo">CUBIT</div>
     <div class="tag">Open-world voxel survival</div>
-    <a class="go" id="play" href="https://play.cubit.cash/?join=game.cubit.cash:8080"
-       style="display:block;text-align:center;text-decoration:none;line-height:1.3">▶ Play CUBIT</a>
+    <a class="go bigplay" id="play" href="https://play.cubit.cash/?join=game.cubit.cash:8080"
+       style="display:block;text-align:center;text-decoration:none;line-height:1.2">▶ PLAY NOW</a>
+    <a class="xbtn" id="xbtn" href="https://x.com" target="_blank" rel="noopener">𝕏 &nbsp;Follow on X</a>
     <div class="msg">Log in, sign up, or play as guest right inside the game.</div>
   </div>
 

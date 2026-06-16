@@ -135,6 +135,12 @@ Bun.serve({
       return new Response(Bun.file(`${import.meta.dir}/public/index.html`), { headers: { 'Content-Type': 'text/html' } });
     }
 
+    // --- Static assets from public/ (bg.png, favicon, …) ---
+    if (/^\/[\w.-]+\.(png|jpe?g|webp|gif|svg|ico|css|js)$/.test(pathname)) {
+      const f = Bun.file(`${import.meta.dir}/public${pathname}`);
+      if (await f.exists()) return new Response(f, { headers: { 'Cache-Control': 'public, max-age=86400' } });
+    }
+
     return new Response('Not found', { status: 404 });
   },
 });

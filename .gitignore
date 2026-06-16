@@ -25,3 +25,4 @@ backend/data.sqlite*
 # Production deploy: secrets + built client (deploy/ scaffolding IS tracked)
 deploy/.env
 /client-dist/
+backend/public/bg.png
