@@ -9,7 +9,7 @@
     <div id="time-track"><div id="time-fill"></div></div>
   </div>
 
-  <div id="objective" class="panel">🌲 Explore · ⚔️ fight · 🛠️ build · 🚗 drive</div>
+  <div id="objective" class="panel"><span class="k">WASD</span>move<span class="k">Space</span>jump<span class="k">Shift</span>run<span class="k">LMB</span>mine<span class="k">RMB</span>place<span class="k">1-9</span>hotbar<span class="k">E</span>vehicle<span class="k">Q</span>gun<span class="k">F</span>eat<span class="k">X</span>fish<span class="k">R</span>shop</div>
 
   <div id="health" class="panel">
     <span id="hp-label">❤️ 100</span>
@@ -249,7 +249,9 @@
   #time-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.2); overflow: hidden; }
   #time-fill { height: 100%; width: 30%; background: linear-gradient(90deg,#ffd56b,#ff8c42); transition: width 0.8s linear; }
 
-  #objective { top: 16px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.92; }
+  #objective { top: 12px; left: 50%; transform: translateX(-50%); font-size: 11px; opacity: 0.9; max-width: 94vw; text-align: center; line-height: 1.9; font-weight: 500; }
+  #objective .k { display: inline-block; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.28); border-radius: 5px; padding: 1px 5px; margin: 0 4px 0 9px; font-size: 10.5px; font-weight: 800; }
+  #objective .k:first-child { margin-left: 0; }
 
   #health { bottom: 20px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
   #hp-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; }
