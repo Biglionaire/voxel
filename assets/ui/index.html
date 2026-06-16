@@ -1,0 +1,167 @@
+<!--
+  Survival Explorer — game HUD (v3): clock, objective, health, inventory,
+  crosshair, hurt flash, gun indicator, and floating mob health bars (SceneUI).
+-->
+
+<div id="hud">
+  <div id="clock" class="panel">
+    <span id="phase">☀️ Day</span>
+    <div id="time-track"><div id="time-fill"></div></div>
+  </div>
+
+  <div id="objective" class="panel">🌲 Explore · ⚔️ fight · 🛠️ build · 🚗 drive</div>
+
+  <div id="health" class="panel">
+    <span id="hp-label">❤️ 100</span>
+    <div id="hp-track"><div id="hp-fill"></div></div>
+  </div>
+
+  <div id="gun-indicator" class="panel">🔫 AK-47</div>
+  <div id="inventory"></div>
+  <div id="crosshair"></div>
+  <div id="hurt"></div>
+  <div id="toast"></div>
+</div>
+
+<!-- Floating mob health bar template (rendered in 3D space via SceneUI) -->
+<template id="mob-health-template">
+  <div class="mob-hp"><div class="mob-hp-fill"></div></div>
+</template>
+
+<script>
+  const phaseEl = document.getElementById('phase');
+  const timeFill = document.getElementById('time-fill');
+  const hpLabel = document.getElementById('hp-label');
+  const hpFill = document.getElementById('hp-fill');
+  const invEl = document.getElementById('inventory');
+  const toastEl = document.getElementById('toast');
+  const hurtEl = document.getElementById('hurt');
+  const gunEl = document.getElementById('gun-indicator');
+
+  let toastTimer = null;
+  function showToast(text) {
+    toastEl.textContent = text; toastEl.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1400);
+  }
+
+  let lastTotal = 0;
+  hytopia.onData(data => {
+    if (!data || !data.type) return;
+
+    if (data.type === 'state') {
+      const pct = Math.max(0, Math.min(100, (data.hp / data.maxHp) * 100));
+      hpLabel.textContent = '❤️ ' + Math.max(0, Math.round(data.hp));
+      hpFill.style.width = pct + '%';
+      hpFill.style.background = pct > 50 ? 'linear-gradient(90deg,#4caf50,#8bc34a)'
+        : pct > 25 ? 'linear-gradient(90deg,#ff9800,#ffc107)' : 'linear-gradient(90deg,#e53935,#ff5252)';
+
+      invEl.innerHTML = '';
+      (data.items || []).forEach((it, i) => {
+        const slot = document.createElement('div');
+        slot.className = 'slot' + (i === data.selected ? ' selected' : '') + (it.placeable ? ' placeable' : '');
+        slot.innerHTML =
+          (i < 9 ? '<span class="num">' + (i + 1) + '</span>' : '') +
+          '<span class="emoji">' + (it.emoji || '📦') + '</span>' +
+          '<span class="count">' + it.count + '</span>';
+        slot.title = it.name + (it.placeable ? ' (placeable)' : '');
+        invEl.appendChild(slot);
+      });
+      if (!(data.items || []).length) invEl.innerHTML = '<div class="slot empty">empty</div>';
+
+      if (typeof data.collected === 'number' && data.collected > lastTotal) showToast('+ item');
+      lastTotal = data.collected || 0;
+    }
+
+    if (data.type === 'time') {
+      phaseEl.textContent = data.phase === 'night' ? '🌙 Night' : '☀️ Day';
+      timeFill.style.width = Math.round((data.t || 0) * 100) + '%';
+    }
+
+    if (data.type === 'hurt') {
+      hurtEl.classList.remove('flash'); void hurtEl.offsetWidth; hurtEl.classList.add('flash');
+    }
+
+    if (data.type === 'gun') {
+      gunEl.style.display = data.equipped ? 'block' : 'none';
+    }
+  });
+
+  // Floating mob health bars in 3D space.
+  if (hytopia.registerSceneUITemplate) {
+    hytopia.registerSceneUITemplate('mob-health', (id, onState) => {
+      const tpl = document.getElementById('mob-health-template');
+      const clone = tpl.content.cloneNode(true);
+      const fill = clone.querySelector('.mob-hp-fill');
+      onState(state => {
+        const pct = Math.max(0, Math.min(100, state.pct || 0));
+        fill.style.width = pct + '%';
+        fill.style.background = pct > 50 ? '#7ed957' : pct > 25 ? '#ffcc33' : '#ff5252';
+      });
+      return clone;
+    });
+  }
+</script>
+
+<style>
+  #hud { position: fixed; inset: 0; pointer-events: none; font-family: 'Inter', system-ui, sans-serif; color: #fff; user-select: none; }
+  .panel { position: fixed; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 8px 14px; font-size: 15px; font-weight: 600; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+
+  #clock { top: 16px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
+  #time-track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.2); overflow: hidden; }
+  #time-fill { height: 100%; width: 30%; background: linear-gradient(90deg,#ffd56b,#ff8c42); transition: width 0.8s linear; }
+
+  #objective { top: 16px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.92; }
+
+  #health { bottom: 20px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
+  #hp-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; }
+  #hp-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4caf50,#8bc34a); transition: width 0.25s ease, background 0.25s ease; }
+
+  #gun-indicator { display: none; bottom: 20px; right: 16px; color: #ffcc33; }
+
+  #inventory { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+  .slot { pointer-events: none; width: 50px; height: 50px; border-radius: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(0,0,0,0.35); position: relative; }
+  .slot .emoji { font-size: 23px; line-height: 1; }
+  .slot .count { position: absolute; bottom: 2px; right: 5px; font-size: 12px; font-weight: 700; color: #ffe066; text-shadow: 1px 1px 2px #000; }
+  .slot .num { position: absolute; top: 2px; left: 4px; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.55); }
+  .slot.placeable { border-color: rgba(120,200,255,0.4); }
+  .slot.selected { border-color: #ffe066; border-width: 2px; box-shadow: 0 0 12px rgba(255,224,102,0.6); transform: translateY(-4px); }
+  .slot.empty { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: 500; }
+
+  /* Crosshair */
+  #crosshair { position: fixed; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255,255,255,0.85); box-shadow: 0 0 0 1.5px rgba(0,0,0,0.6); }
+
+  /* Hurt flash (red vignette) */
+  #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; box-shadow: inset 0 0 160px 40px rgba(220,0,0,0.85); }
+  #hurt.flash { animation: hurtflash 0.45s ease-out; }
+  @keyframes hurtflash { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+
+  #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(10px); background: rgba(20,140,50,0.92); border-radius: 12px; padding: 8px 20px; font-size: 16px; font-weight: 700; opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* Floating mob health bar */
+  .mob-hp { width: 46px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,0,0,0.5); overflow: hidden; }
+  .mob-hp-fill { height: 100%; width: 100%; background: #7ed957; transition: width 0.15s ease; }
+</style>
+
+<!-- ===================== MOBILE CONTROLS (boilerplate) ===================== -->
+<script>
+  const mobileInteractButton = document.getElementById('mobile-interact-button');
+  mobileInteractButton.addEventListener('touchstart', e => { e.preventDefault(); mobileInteractButton.classList.add('active'); hytopia.pressInput('ml', true); });
+  mobileInteractButton.addEventListener('touchend', e => { e.preventDefault(); mobileInteractButton.classList.remove('active'); hytopia.pressInput('ml', false); });
+  const mobileJumpButton = document.getElementById('mobile-jump-button');
+  mobileJumpButton.addEventListener('touchstart', e => { e.preventDefault(); mobileJumpButton.classList.add('active'); hytopia.pressInput(' ', true); });
+  mobileJumpButton.addEventListener('touchend', e => { e.preventDefault(); mobileJumpButton.classList.remove('active'); hytopia.pressInput(' ', false); });
+</script>
+
+<div class="mobile-controls">
+  <a id="mobile-interact-button" class="mobile-button"><img src="{{CDN_ASSETS_URL}}/icons/target.png" /></a>
+  <a id="mobile-jump-button" class="mobile-button"><img src="{{CDN_ASSETS_URL}}/icons/jump.png" /></a>
+</div>
+
+<style>
+  .mobile-controls { display: none; }
+  body.mobile .mobile-controls { display: flex; gap: 14px; position: fixed; bottom: 80px; right: 40px; }
+  .mobile-button { background-color: rgba(0,0,0,0.5); border-radius: 50%; align-items: center; justify-content: center; display: flex; width: 50px; height: 50px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); color: rgba(255,255,255,0.8); pointer-events: auto !important; }
+  .mobile-button img { width: 22px; height: 22px; }
+  .mobile-button.active { transform: scale(0.92); background-color: rgba(0,0,0,0.75); }
+</style>
