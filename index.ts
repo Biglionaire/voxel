@@ -887,6 +887,24 @@ startServer(world => {
     }
   }
 
+  /* --- Flatland: an empty flat creative plot (in the void, far from the terrain).
+   * Block break/place is allowed ONLY here; the main survival world is protected.
+   * Reach it with /build, return with /home. */
+  const FLAT = { x: 400, z: 400, y: 64, half: 40 };
+  const flatSpawn = { x: FLAT.x + 0.5, y: FLAT.y + 2, z: FLAT.z + 0.5 };
+  const inFlatland = (x: number, z: number) => Math.abs(x - FLAT.x) <= FLAT.half + 1 && Math.abs(z - FLAT.z) <= FLAT.half + 1;
+  const lastBlockMsg = new Map<any, number>();
+  function buildBlocked(player: any) {
+    const n = Date.now(); if (n - (lastBlockMsg.get(player) ?? 0) < 2500) return; lastBlockMsg.set(player, n);
+    toast(player, '🚫 Build only in the Flatland — /build');
+    world.chatManager.sendPlayerMessage(player, '🚫 Blocks can only be taken or placed in the Flatland. Type /build to go there · /home to return.', 'FF8844');
+  }
+  for (let x = FLAT.x - FLAT.half; x <= FLAT.x + FLAT.half; x++) for (let z = FLAT.z - FLAT.half; z <= FLAT.z + FLAT.half; z++) {
+    setB(x, FLAT.y, z, BLOCK.GRASS);
+    if (Math.abs(x - FLAT.x) === FLAT.half || Math.abs(z - FLAT.z) === FLAT.half) for (let y = FLAT.y + 1; y <= FLAT.y + 2; y++) setB(x, y, z, BLOCK.STONE); // rim so nobody falls into the void
+  }
+  console.log(`[world] flatland: ${FLAT.half * 2}x${FLAT.half * 2} build plot at (${FLAT.x}, ${FLAT.z})`);
+
   /* --- Building, guns & combat helpers ----------------------------- */
   const GUN_RANGE = 60, GUN_DAMAGE = 55, GUN_COOLDOWN_MS = 220;
 
@@ -1066,6 +1084,10 @@ startServer(world => {
       if (rodLv > 0) {
         let nearWater = false, wx = pe.position.x, wz = pe.position.z; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
         for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; wx = bx + dx + 0.5; wz = bz + dz + 0.5; break; }
+        if (nearWater) { // aim the cast at water in FRONT of the player (where they're looking), not just the nearest cell
+          const fd = player.camera?.facingDirection ?? { x: 0, y: 0, z: 1 }, fl = Math.hypot(fd.x, fd.z) || 1;
+          for (let r = 2; r <= 6; r++) { const cx = Math.round(pe.position.x + (fd.x / fl) * r), cz = Math.round(pe.position.z + (fd.z / fl) * r); if (heightAt(cx, cz) < SEA_LEVEL) { wx = cx + 0.5; wz = cz + 0.5; break; } }
+        }
         if (!nearWater) { world.chatManager.sendPlayerMessage(player, '🎣 Stand near water — head to a fishing pier or the shore.', 'FF8844'); toast(player, '🎣 Stand closer to water'); }
         else if ((inv.get('bait') ?? 0) <= 0) {
           world.chatManager.sendPlayerMessage(player, '🪱 Out of bait — buy some at the Marketplace (R).', 'FF8844');
@@ -1156,7 +1178,8 @@ startServer(world => {
             new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.4 }).play(world);
           } else if (hit?.hitBlock && now - (lastBuild.get(player) ?? 0) > 200) {
             lastBuild.set(player, now);
-            breakBlock(player, hit.hitBlock);
+            if (inFlatland(pe.position.x, pe.position.z)) breakBlock(player, hit.hitBlock);
+            else buildBlocked(player);
           }
         }
       } catch (e) { console.warn('left-click error', e); }
@@ -1167,7 +1190,7 @@ startServer(world => {
       lastBuild.set(player, now);
       try {
         const hit = castFromCamera(player, pe, 6);
-        if (hit?.hitBlock) placeBlock(player, hit.hitBlock, hit.hitPoint);
+        if (hit?.hitBlock) { if (inFlatland(pe.position.x, pe.position.z)) placeBlock(player, hit.hitBlock, hit.hitPoint); else buildBlocked(player); }
       } catch (e) { console.warn('place error', e); }
     }
 
@@ -1251,6 +1274,7 @@ startServer(world => {
     world.chatManager.sendPlayerMessage(player, 'L-click attack/mine · R-click place selected block · Q gun');
     world.chatManager.sendPlayerMessage(player, '1-9 hotbar · E vehicle · F eat · R marketplace (anywhere)');
     world.chatManager.sendPlayerMessage(player, '🎣 Buy a fishing-rod, stand near water, press X to fish · C to cook fish');
+    world.chatManager.sendPlayerMessage(player, '🏗️ The wild is protected — type /build to enter the Flatland and build freely (/home to return).');
     world.chatManager.sendPlayerMessage(player, 'Explore the villages! Commands: /build /home /heal /give /time');
   });
 
@@ -1281,9 +1305,12 @@ startServer(world => {
   world.chatManager.registerCommand('/heal', player => { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, 'Healed to full.', '66FF66'); });
   world.chatManager.registerCommand('/give', player => { COLLECTIBLES.forEach(n => addItem(player, n, 1)); world.chatManager.sendPlayerMessage(player, 'Gave one of each item.', 'FFE066'); });
   world.chatManager.registerCommand('/build', player => {
+    if (driving.has(player)) world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => dismount(player, e as PlayerEntity));
     ['cobblestone', 'stone', 'bricks', 'oak-log', 'sand', 'grass-block'].forEach(b => addItem(player, b, 64));
     Object.keys(PROP_MODELS).forEach(p => addItem(player, p, 16));
-    world.chatManager.sendPlayerMessage(player, '🏗️ Full building kit added (blocks + all furniture).', 'FFE066');
+    world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.setPosition(flatSpawn));
+    world.chatManager.sendPlayerMessage(player, '🏗️ Welcome to the Flatland — build freely here! Full kit added. Type /home to return to the world.', 'FFE066');
+    toast(player, '🏗️ Flatland — build freely!');
   });
   world.chatManager.registerCommand('/time', player => world.chatManager.sendPlayerMessage(player, `It is ${night ? 'night' : 'day'} (t=${timeOfDay.toFixed(2)}).`));
 
