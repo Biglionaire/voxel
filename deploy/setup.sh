@@ -12,6 +12,14 @@ KTX_VERSION="${KTX_VERSION:-4.4.2}"
 
 echo "==> CUBIT setup in: $REPO_DIR"
 
+# 0) OS packages the installers need (apt-based distros; skipped if no apt/sudo).
+if command -v apt-get >/dev/null 2>&1; then
+	echo "==> Installing OS deps (git curl unzip bzip2 tar)…"
+	SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+	$SUDO apt-get update -qq || true
+	$SUDO apt-get install -y -qq git curl unzip bzip2 tar >/dev/null 2>&1 || true
+fi
+
 # 1) Bun (WSL/Linux native). Installs to ~/.bun.
 if ! command -v bun >/dev/null 2>&1 && [ ! -x "$HOME/.bun/bin/bun" ]; then
 	echo "==> Installing Bun…"
