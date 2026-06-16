@@ -40,6 +40,7 @@ const SEA_LEVEL = 11;
 const MOUNTAIN_LEVEL = 22;
 const MAX_HP = 100;
 const TOTAL_ITEMS = 40;
+const SIGNUP_BONUS_COINS = 1000; // coins granted once on account signup (placeholder for on-chain $CUBIT / Solana)
 const MOB_COUNT = 16;
 const ATTACK_RANGE = 4;
 const ATTACK_DAMAGE = 34;
@@ -1363,6 +1364,14 @@ startServer(world => {
           world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
         }
       } catch {}
+      if (mode === 'signup') {
+        // Signup bonus: 1000 coins. TEMPORARY placeholder — to be replaced by an
+        // on-chain $CUBIT balance (Solana) once payments are wired up.
+        addItem(player, 'gold-ingot', SIGNUP_BONUS_COINS);
+        world.chatManager.sendPlayerMessage(player, `🪙 Welcome bonus: +${SIGNUP_BONUS_COINS} coins!`, 'FFD700');
+        toast(player, `🪙 +${SIGNUP_BONUS_COINS} coin signup bonus!`);
+        await saveProfile(player); // persist immediately so the bonus survives a quick disconnect
+      }
       sendHud(player);
       try { (pe as any).nametagSceneUI?.setState({ username: data.username, profilePictureUrl: '' }); } catch {} // change the floating name
       try { player.ui.sendData({ type: 'auth-ok', username: data.username }); player.ui.lockPointer(true); } catch {}
