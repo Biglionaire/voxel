@@ -446,16 +446,38 @@ startServer(world => {
   ];
   {
     const cands = landColumns.filter(c => Math.abs(c.x) < 58 && Math.abs(c.z) < 58 && c.biome !== 'mountain');
-    for (let attempt = 0; attempt < 800 && !cityCenter; attempt++) {
+    const farFromVillages = (c: { x: number; z: number }) =>
+      !villageCenters.some(v => Math.hypot(v.x - c.x, v.z - c.z) < 42); // keep city plot off village plots
+    let site: { x: number; z: number } | null = null;
+    for (let attempt = 0; attempt < 800 && !site; attempt++) {
       const c = cands[Math.floor(Math.random() * cands.length)];
       if (!c) break;
       // City levels its own plot, so only the core needs to be roughly flat land.
-      if (!flatEnough(c.x, c.z, 9, 10)) continue;
-      if (villageCenters.some(v => Math.hypot(v.x - c.x, v.z - c.z) < 42)) continue; // keep city plot off village plots
-      const r = buildCity(c.x, c.z);
-      cityCenter = { x: c.x, z: c.z, gy: r.gy };
-      townZones.push({ x: c.x, z: c.z, r: 20 });
-      const sx = c.x + 6.5, sz = c.z + 0.5; // spawn street — make Market/Clinic the nearest buildings
+      if (flatEnough(c.x, c.z, 9, 10) && farFromVillages(c)) site = { x: c.x, z: c.z };
+    }
+    if (!site) {
+      // Fallback: the city force-levels its own plot, so rather than fail to place a
+      // city at all, pick the flattest available candidate (smallest height spread).
+      const spread = (cx: number, cz: number) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let x = cx - 9; x <= cx + 9; x += 3) for (let z = cz - 9; z <= cz + 9; z += 3) {
+          const h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h);
+        }
+        return hi - lo;
+      };
+      let best: { x: number; z: number } | null = null, bestScore = Infinity;
+      for (const c of cands) {
+        if (!farFromVillages(c)) continue;
+        const s = spread(c.x, c.z);
+        if (s < bestScore) { bestScore = s; best = c; }
+      }
+      if (best) { site = best; console.log(`[world] city: fallback to flattest site (spread ${bestScore})`); }
+    }
+    if (site) {
+      const r = buildCity(site.x, site.z);
+      cityCenter = { x: site.x, z: site.z, gy: r.gy };
+      townZones.push({ x: site.x, z: site.z, r: 20 });
+      const sx = site.x + 6.5, sz = site.z + 0.5; // spawn street — make Market/Clinic the nearest buildings
       const ordered = [...r.towers].sort((a, b) => Math.hypot(a.x - sx, a.z - sz) - Math.hypot(b.x - sx, b.z - sz));
       ordered.forEach((t, i) => {
         if (i >= BUILDING_THEMES.length) return;
@@ -466,9 +488,10 @@ startServer(world => {
         // A small physical sign at the entrance (no floating sky label).
         placeModel(PROP_MODELS.window, t.x + 0.5, r.gy + 2.5, t.z - 4.4, 1.4);
       });
-      console.log(`[world] city: ${r.towers.length} buildings (${functionalBuildings.length} functional) at (${c.x}, ${c.z})`);
+      console.log(`[world] city: ${r.towers.length} buildings (${functionalBuildings.length} functional) at (${site.x}, ${site.z})`);
+    } else {
+      console.log('[world] city: no suitable flat site found');
     }
-    if (!cityCenter) console.log('[world] city: no suitable flat site found');
   }
 
   // Remove scenery (trees/rocks/foliage) that ended up inside a village or city plot,
@@ -482,18 +505,32 @@ startServer(world => {
   // Land away from town centers — for scattering items & mobs without burying them in buildings.
   const openLand = landColumns.filter(c => !inTown(c.x, c.z));
 
-  /* --- Fishing piers (12+ platforms over water across the map) ----- */
+  /* --- Fishing piers: jut out from the shoreline on support posts --- */
   {
     const piers: { x: number; z: number }[] = [];
-    for (let attempt = 0; attempt < 5000 && piers.length < 14; attempt++) {
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const isWater = (x: number, z: number) => heightAt(x, z) < SEA_LEVEL;
+    for (let attempt = 0; attempt < 9000 && piers.length < 14; attempt++) {
       const w = waterColumns[Math.floor(Math.random() * waterColumns.length)];
       if (!w) break;
       if (Math.abs(w.x) > WORLD_RADIUS - 8 || Math.abs(w.z) > WORLD_RADIUS - 8) continue;
       if (piers.some(p => Math.hypot(p.x - w.x, p.z - w.z) < 26)) continue; // spread out
-      const py = SEA_LEVEL + 1;
-      for (let i = 0; i < 6; i++) for (let ww = 0; ww <= 1; ww++) setB(w.x + i, py, w.z + ww, BLOCK.OAK_LOG); // deck
-      setB(w.x + 5, py + 1, w.z, BLOCK.OAK_LOG);
-      placeModel(PROP_MODELS.lantern, w.x + 5.5, propRestY('lantern', py + 1), w.z + 0.5);
+      // Anchor to a gentle beach: low land directly behind the root, open water ahead — deck juts seaward.
+      let dir: number[] | null = null;
+      for (const [dx, dz] of DIRS) {
+        if (!isWater(w.x - dx, w.z - dz) && heightAt(w.x - dx, w.z - dz) <= SEA_LEVEL + 3 && isWater(w.x + dx * 5, w.z + dz * 5)) { dir = [dx, dz]; break; }
+      }
+      if (!dir) continue;
+      const [dx, dz] = dir, px = dz, pz = dx; // px,pz = perpendicular (2-wide deck)
+      const py = SEA_LEVEL + 1, LEN = 6;
+      for (let i = 0; i < LEN; i++) for (let s = 0; s <= 1; s++) {
+        const X = w.x + dx * i + px * s, Z = w.z + dz * i + pz * s;
+        setB(X, py, Z, BLOCK.OAK_LOG);                                  // deck plank
+        for (let y = py - 1; y > heightAt(X, Z); y--) setB(X, y, Z, BLOCK.OAK_LOG); // post to seabed
+      }
+      const ex = w.x + dx * (LEN - 1), ez = w.z + dz * (LEN - 1);       // seaward end
+      setB(ex, py + 1, ez, BLOCK.OAK_LOG);
+      placeModel(PROP_MODELS.lantern, ex + 0.5, propRestY('lantern', py + 1), ez + 0.5);
       piers.push({ x: w.x, z: w.z });
     }
     console.log(`[world] ${piers.length} fishing piers`);
@@ -508,6 +545,7 @@ startServer(world => {
   const driving = new Map<any, VehicleObj>();
   const mountCooldown = new Map<any, number>(); // prevents instant re-mount after exit
   const gunEntity = new Map<any, Entity>();     // player -> held gun entity (when equipped)
+  const rodEntity = new Map<any, Entity>();     // player -> held fishing-rod entity (while casting)
   const lastBuild = new Map<any, number>();     // build/break rate limit
   const selectedSlot = new Map<any, number>();  // selected hotbar slot index
   const placedProps = new Set<Entity>();        // player-placed furniture/structure entities
@@ -525,6 +563,9 @@ startServer(world => {
     const sel = Math.min(selectedSlot.get(player) ?? 0, Math.max(0, items.length - 1));
     player.ui.sendData({ type: 'state', hp: hp.get(player) ?? MAX_HP, maxHp: MAX_HP, items, selected: sel, collected: [...inv.values()].reduce((a, b) => a + b, 0), total: TOTAL_ITEMS });
   }
+
+  // A visible on-screen toast (UI overlay) — reliable even if the chat panel is hidden.
+  function toast(player: any, text: string) { try { player.ui.sendData({ type: 'toast', text }); } catch {} }
 
   // The item name in the currently selected hotbar slot (or null).
   function selectedItemName(player: any): string | null {
@@ -927,35 +968,49 @@ startServer(world => {
     // Open/close the marketplace shop (R) — works anywhere.
     if (input.r && !prev.r) { if (shopOpen.has(player)) closeShop(player); else openShop(player); }
 
-    // Fishing (X) — need a rod (any level) + bait, near water. Higher rod = more rares, faster.
+    // Fishing (X) — need a rod (any level) + bait, near water. Higher rod = faster + more rares.
     if (input.x && !prev.x && !fishing.has(player)) {
       const inv = getInv(player);
       const rodLv = (inv.get('fishing-rod-3') ?? 0) > 0 ? 3 : (inv.get('fishing-rod-2') ?? 0) > 0 ? 2 : (inv.get('fishing-rod') ?? 0) > 0 ? 1 : 0;
       if (rodLv > 0) {
-        if ((inv.get('bait') ?? 0) <= 0) world.chatManager.sendPlayerMessage(player, '🎣 Out of bait — buy some at the Marketplace.', 'FF8844');
-        else {
-          let nearWater = false; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
-          for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; break; }
-          if (!nearWater) world.chatManager.sendPlayerMessage(player, '🎣 Stand near water — head to a fishing pier.', 'FF8844');
-          else {
-            inv.set('bait', inv.get('bait')! - 1); if (inv.get('bait')! <= 0) inv.delete('bait'); sendHud(player);
-            fishing.add(player);
-            world.chatManager.sendPlayerMessage(player, '🎣 Cast! Waiting for a bite…', '88CCFF');
-            try { (pe as any).startModelOneshotAnimations?.(['simple-interact']); } catch {}
-            const rareChance = 0.1 + rodLv * 0.12;
-            const delay = Math.max(1500, 4000 - rodLv * 600 + Math.random() * 2500);
-            setTimeout(() => {
-              if (!fishing.has(player)) return;
-              fishing.delete(player);
-              const roll = Math.random();
-              const fish = roll < rareChance ? pick(['pufferfish', 'clownfish', 'catfish', 'parrotfish', 'lionfish', 'sailfish', 'swordfish', 'anglerfish'])
-                : roll < rareChance + 0.4 ? 'salmon-raw' : 'cod-raw';
-              addItem(player, fish);
-              new Audio({ uri: 'audio/sfx/liquid/splash-01.mp3', volume: 0.6 }).play(world);
-              world.chatManager.sendPlayerMessage(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`, '88FF88');
-            }, delay);
-          }
+        let nearWater = false; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
+        for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; break; }
+        if (!nearWater) { world.chatManager.sendPlayerMessage(player, '🎣 Stand near water — head to a fishing pier or the shore.', 'FF8844'); toast(player, '🎣 Stand closer to water'); }
+        else if ((inv.get('bait') ?? 0) <= 0) {
+          world.chatManager.sendPlayerMessage(player, '🪱 Out of bait — buy some at the Marketplace (R).', 'FF8844');
+          toast(player, '🪱 Out of bait — buy at Marketplace (R)');
         }
+        else {
+          inv.set('bait', inv.get('bait')! - 1); if (inv.get('bait')! <= 0) inv.delete('bait'); sendHud(player);
+          fishing.add(player);
+          world.chatManager.sendPlayerMessage(player, '🎣 Cast! Waiting for a bite…', '88CCFF');
+          toast(player, '🎣 Cast — reeling…');
+          // Show the rod in the player's hand for the duration (same held-entity pattern as the gun).
+          try {
+            rodEntity.get(player)?.despawn();
+            const rod = new Entity({ name: 'Rod', modelUri: 'models/items/fishing-rod.gltf', modelScale: 0.6, parent: pe, parentNodeName: 'hand-right-anchor' });
+            rod.spawn(world, { x: 0, y: 0.1, z: 0 }, { x: 0, y: 0, z: 0, w: 1 });
+            rodEntity.set(player, rod);
+          } catch (e) { console.warn('rod equip error', e); }
+          try { (pe as any).startModelOneshotAnimations?.(['simple-interact']); } catch {}
+          const rareChance = 0.1 + rodLv * 0.12;
+          const delay = Math.max(1500, 4000 - rodLv * 600 + Math.random() * 2500);
+          setTimeout(() => {
+            try { rodEntity.get(player)?.despawn(); } catch {} rodEntity.delete(player);
+            if (!fishing.has(player)) return;
+            fishing.delete(player);
+            const roll = Math.random();
+            const fish = roll < rareChance ? pick(['pufferfish', 'clownfish', 'catfish', 'parrotfish', 'lionfish', 'sailfish', 'swordfish', 'anglerfish'])
+              : roll < rareChance + 0.4 ? 'salmon-raw' : 'cod-raw';
+            addItem(player, fish);
+            new Audio({ uri: 'audio/sfx/liquid/splash-01.mp3', volume: 0.6 }).play(world);
+            world.chatManager.sendPlayerMessage(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`, '88FF88');
+            toast(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`);
+          }, delay);
+        }
+      } else {
+        world.chatManager.sendPlayerMessage(player, '🎣 You need a fishing-rod — press R to open the Marketplace, then buy one (15🪙).', 'FF8844');
+        toast(player, '🎣 Need a fishing-rod (press R)');
       }
     }
 
@@ -1114,6 +1169,8 @@ startServer(world => {
     accountOf.delete(player); tokenOf.delete(player); authed.delete(player);
     try { gunEntity.get(player)?.despawn(); } catch {}
     gunEntity.delete(player);
+    try { rodEntity.get(player)?.despawn(); } catch {}
+    rodEntity.delete(player); fishing.delete(player);
     world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.despawn());
   });
 
@@ -1162,7 +1219,8 @@ startServer(world => {
 
   function buildingAt(pe: PlayerEntity) {
     for (const b of functionalBuildings) {
-      if (Math.hypot(pe.position.x - (b.x + 0.5), pe.position.z - (b.z + 0.5)) < 8) return b;
+      // Only when actually inside the building footprint (walls sit at ±4), not just beside it.
+      if (Math.abs(pe.position.x - (b.x + 0.5)) <= 3.5 && Math.abs(pe.position.z - (b.z + 0.5)) <= 3.5) return b;
     }
     return null;
   }

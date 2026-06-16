@@ -131,6 +131,8 @@
       gunEl.style.display = data.equipped ? 'block' : 'none';
     }
 
+    if (data.type === 'toast' && data.text) showToast(data.text);
+
     if (data.type === 'building') {
       const p = document.getElementById('building-prompt');
       p.textContent = data.label ? (data.label + (data.shop ? ' — press R to trade' : '')) : '';
