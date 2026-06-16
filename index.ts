@@ -566,7 +566,7 @@ startServer(world => {
   const mountCooldown = new Map<any, number>(); // prevents instant re-mount after exit
   const gunEntity = new Map<any, Entity>();     // player -> held gun entity (when equipped)
   const rodEntity = new Map<any, Entity>();     // player -> held fishing-rod entity (while casting)
-  const bobberEntity = new Map<any, Entity>();  // player -> floating bobber on the water (while casting)
+  const fishingFx = new Map<any, { bobber: Entity | null; line: Entity[]; iv: any }>(); // cast bobber + line beads
   const lastBuild = new Map<any, number>();     // build/break rate limit
   const selectedSlot = new Map<any, number>();  // selected hotbar slot index
   const placedProps = new Set<Entity>();        // player-placed furniture/structure entities
@@ -976,17 +976,50 @@ startServer(world => {
   const FISH_MODEL: Record<string, string> = { 'cod-raw': 'models/items/cod-raw.gltf', 'salmon-raw': 'models/items/salmon-raw.gltf' };
   const fishModelFor = (item: string) => FISH_MODEL[item] ?? `models/npcs/fish/${item}.gltf`;
 
-  function spawnBobber(player: any, wx: number, wz: number) {
-    try { bobberEntity.get(player)?.despawn(); } catch {}
-    try {
-      const bob = new Entity({ name: 'Bobber', modelUri: 'models/items/snowball.gltf', modelScale: 0.3,
-        rigidBodyOptions: { type: RigidBodyType.KINEMATIC_POSITION }, modelPreferredShape: ColliderShape.NONE });
-      bob.spawn(world, { x: wx, y: SEA_LEVEL + 1.0, z: wz });
-      bobberEntity.set(player, bob);
-    } catch (e) { console.warn('bobber error', e); }
-    try { new Audio({ uri: 'audio/sfx/liquid/splash-03.mp3', volume: 0.5 }).play(world); } catch {}
+  // Approximate the rod-tip world position (in front of the player at hand height).
+  function rodTipOf(player: any, pe: PlayerEntity) {
+    const d = player.camera?.facingDirection ?? { x: 0, y: 0, z: 1 };
+    const hl = Math.hypot(d.x, d.z) || 1;
+    return { x: pe.position.x + (d.x / hl) * 0.7, y: pe.position.y + 1.2, z: pe.position.z + (d.z / hl) * 0.7 };
   }
-  function clearBobber(player: any) { try { bobberEntity.get(player)?.despawn(); } catch {} bobberEntity.delete(player); }
+  const mkFx = (scale: number) => {
+    try { return new Entity({ name: 'FishFX', modelUri: 'models/items/snowball.gltf', modelScale: scale,
+      rigidBodyOptions: { type: RigidBodyType.KINEMATIC_POSITION }, modelPreferredShape: ColliderShape.NONE }); }
+    catch { return null; }
+  };
+  function clearLine(player: any) {
+    const fx = fishingFx.get(player); if (!fx) return;
+    try { clearInterval(fx.iv); } catch {}
+    try { fx.bobber?.despawn(); } catch {}
+    for (const d of fx.line) { try { d.despawn(); } catch {} }
+    fishingFx.delete(player);
+  }
+  // Cast: the bobber is thrown from the rod tip, arcs out to the water, and a line
+  // of beads connects the (moving) rod tip to it for the duration.
+  function castLine(player: any, pe: PlayerEntity, wx: number, wz: number) {
+    clearLine(player);
+    const tip0 = rodTipOf(player, pe);
+    const water = { x: wx, y: SEA_LEVEL + 1.0, z: wz };
+    const bobber = mkFx(0.3); try { bobber?.spawn(world, tip0); } catch {}
+    const line: Entity[] = [];
+    for (let i = 0; i < 8; i++) { const e = mkFx(0.07); if (e) { try { e.spawn(world, tip0); } catch {} line.push(e); } }
+    let bpos = { ...tip0 }, t = 0; const throwSteps = 6;
+    const iv = setInterval(() => {
+      t++;
+      if (t <= throwSteps) {                                   // throw arc: rod tip → water
+        const f = t / throwSteps;
+        bpos = { x: tip0.x + (water.x - tip0.x) * f, y: tip0.y + (water.y - tip0.y) * f + 1.4 * Math.sin(Math.PI * f), z: tip0.z + (water.z - tip0.z) * f };
+        if (t === throwSteps) { try { new Audio({ uri: 'audio/sfx/liquid/splash-03.mp3', volume: 0.5 }).play(world); } catch {} }
+      } else { bpos = water; }                                 // resting on the water
+      try { bobber?.setPosition(bpos); } catch {}
+      const tip = rodTipOf(player, pe);                         // follow the player if they move
+      for (let i = 0; i < line.length; i++) {
+        const f = (i + 1) / (line.length + 1);
+        try { line[i].setPosition({ x: tip.x + (bpos.x - tip.x) * f, y: tip.y + (bpos.y - tip.y) * f, z: tip.z + (bpos.z - tip.z) * f }); } catch {}
+      }
+    }, 50);
+    fishingFx.set(player, { bobber, line, iv });
+  }
 
   // A fish leaps out of the water at (wx,wz) and arcs up toward the player as it's reeled in.
   function fishStrike(player: any, pe: PlayerEntity, wx: number, wz: number, item: string) {
@@ -1043,7 +1076,7 @@ startServer(world => {
           fishing.add(player);
           world.chatManager.sendPlayerMessage(player, '🎣 Cast! Waiting for a bite…', '88CCFF');
           toast(player, '🎣 Cast — reeling…');
-          spawnBobber(player, wx, wz); // floating bobber lands on the water with a plop
+          castLine(player, pe, wx, wz); // throw the bobber out to the water + draw the line
           // Show the rod in the player's hand for the duration (same held-entity pattern as the gun).
           try {
             rodEntity.get(player)?.despawn();
@@ -1055,7 +1088,7 @@ startServer(world => {
           const rareChance = 0.1 + rodLv * 0.12;
           const delay = Math.max(1500, 4000 - rodLv * 600 + Math.random() * 2500);
           setTimeout(() => {
-            try { rodEntity.get(player)?.despawn(); } catch {} rodEntity.delete(player); clearBobber(player);
+            try { rodEntity.get(player)?.despawn(); } catch {} rodEntity.delete(player); clearLine(player);
             if (!fishing.has(player)) return;
             fishing.delete(player);
             const roll = Math.random();
@@ -1229,8 +1262,8 @@ startServer(world => {
     try { gunEntity.get(player)?.despawn(); } catch {}
     gunEntity.delete(player);
     try { rodEntity.get(player)?.despawn(); } catch {}
-    try { bobberEntity.get(player)?.despawn(); } catch {}
-    rodEntity.delete(player); bobberEntity.delete(player); fishing.delete(player);
+    clearLine(player);
+    rodEntity.delete(player); fishing.delete(player);
     world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.despawn());
   });
 
