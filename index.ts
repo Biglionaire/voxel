@@ -1273,7 +1273,7 @@ startServer(world => {
     try {
       player.ui.on(PlayerUIEvent.DATA, ({ data }: any) => {
         handleShopUI(player, data);
-        if (data?.type === 'auth') tryAuth(player, pe, data.mode, data.username, data.password);
+        if (data?.type === 'auth') tryAuth(player, pe, data.mode, data.username, data.password, data.hair);
         if (data?.type === 'menu-action') handleMenuAction(player, data.action);
       });
     } catch (e) { console.warn('ui hook error', e); }
@@ -1486,7 +1486,7 @@ startServer(world => {
   const tokenOf = new Map<any, string>();    // player -> JWT
   const authed = new Set<any>();
 
-  async function tryAuth(player: any, pe: PlayerEntity, mode: string, username: string, password: string) {
+  async function tryAuth(player: any, pe: PlayerEntity, mode: string, username: string, password: string, hair?: number) {
     if (mode === 'guest') {
       try { player.ui.sendData({ type: 'auth-ok', username: 'Guest' }); player.ui.lockPointer(true); } catch {}
       world.chatManager.sendPlayerMessage(player, 'Playing as Guest — progress will NOT be saved.', 'FFAA44');
@@ -1515,9 +1515,10 @@ startServer(world => {
         // Signup bonus: 1000 coins. TEMPORARY placeholder — to be replaced by an
         // on-chain $CUBIT balance (Solana) once payments are wired up.
         addItem(player, 'gold-ingot', SIGNUP_BONUS_COINS);
+        if (hair != null) applyHair(player, pe, Number(hair)); // the avatar look chosen on the signup screen
         world.chatManager.sendPlayerMessage(player, `🪙 Welcome bonus: +${SIGNUP_BONUS_COINS} coins!`, 'FFD700');
         toast(player, `🪙 +${SIGNUP_BONUS_COINS} coin signup bonus!`);
-        await saveProfile(player); // persist immediately so the bonus survives a quick disconnect
+        await saveProfile(player); // persist immediately so the bonus + look survive a quick disconnect
       }
       sendHud(player);
       try { (pe as any).nametagSceneUI?.setState({ username: data.username, profilePictureUrl: '' }); } catch {} // change the floating name

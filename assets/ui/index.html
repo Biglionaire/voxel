@@ -35,6 +35,10 @@
     </div>
     <input id="auth-user" placeholder="Username" autocomplete="username" />
     <input id="auth-pass" type="password" placeholder="Password" autocomplete="current-password" />
+    <div id="auth-custom" style="display:none">
+      <div class="auth-custlabel">💇 Choose your hair (free) — change later with /hair</div>
+      <div id="hair-row" class="hair-row"></div>
+    </div>
     <button id="auth-go" type="button">Enter</button>
     <button id="auth-guest" type="button" class="ghost">Play as guest</button>
     <div id="auth-msg"></div>
@@ -192,14 +196,24 @@
 
   // Auth overlay wiring
   let authMode = 'login';
-  const setAuthMode = m => { authMode = m; document.getElementById('atab-login').classList.toggle('active', m === 'login'); document.getElementById('atab-signup').classList.toggle('active', m === 'signup'); document.getElementById('auth-go').textContent = m === 'login' ? 'Enter' : 'Create account'; document.getElementById('auth-msg').textContent = ''; };
+  // Hair picker (shown only when signing up). 0 = bald, 1..10 = styles.
+  let selectedHair = 0;
+  const hairRow = document.getElementById('hair-row');
+  ['Bald', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((label, i) => {
+    const b = document.createElement('div');
+    b.className = 'hair-opt' + (i === 0 ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => { selectedHair = i; [...hairRow.children].forEach((c, j) => c.classList.toggle('active', j === i)); });
+    hairRow.appendChild(b);
+  });
+  const setAuthMode = m => { authMode = m; document.getElementById('atab-login').classList.toggle('active', m === 'login'); document.getElementById('atab-signup').classList.toggle('active', m === 'signup'); document.getElementById('auth-go').textContent = m === 'login' ? 'Enter' : 'Create account'; document.getElementById('auth-msg').textContent = ''; document.getElementById('auth-custom').style.display = m === 'signup' ? 'block' : 'none'; };
   document.getElementById('atab-login').addEventListener('click', () => setAuthMode('login'));
   document.getElementById('atab-signup').addEventListener('click', () => setAuthMode('signup'));
   document.getElementById('auth-go').addEventListener('click', () => {
     const u = document.getElementById('auth-user').value.trim(), p = document.getElementById('auth-pass').value;
     if (!u || !p) { const m = document.getElementById('auth-msg'); m.textContent = 'Enter username & password.'; m.className = 'err'; return; }
     document.getElementById('auth-go').disabled = true; document.getElementById('auth-msg').textContent = '…';
-    hytopia.sendData({ type: 'auth', mode: authMode, username: u, password: p });
+    hytopia.sendData({ type: 'auth', mode: authMode, username: u, password: p, hair: authMode === 'signup' ? selectedHair : undefined });
   });
   document.getElementById('auth-guest').addEventListener('click', () => hytopia.sendData({ type: 'auth', mode: 'guest' }));
 
@@ -317,6 +331,10 @@
   #auth-guest.ghost { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid rgba(255,255,255,0.15); border-radius: 9px; background: transparent; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 13px; }
   #auth-msg { margin-top: 12px; text-align: center; font-size: 13px; min-height: 16px; }
   #auth-msg.err { color: #ff7a7a; }
+  .auth-custlabel { font-size: 12px; color: rgba(255,255,255,0.8); margin: 2px 0 7px; }
+  .hair-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .hair-opt { min-width: 28px; padding: 5px 8px; border-radius: 7px; font-size: 12px; text-align: center; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); color: #fff; }
+  .hair-opt.active { background: rgba(110,200,255,0.25); border-color: #6bc1ff; font-weight: 700; }
 
   /* Floating mob health bar */
   .mob-hp { width: 46px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,0,0,0.5); overflow: hidden; }
