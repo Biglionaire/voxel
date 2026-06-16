@@ -74,18 +74,28 @@ sudo cp deploy/Caddyfile /etc/caddy/Caddyfile   # already set for cubit.cash
 sudo systemctl reload caddy
 ```
 
-### 5. Game-server TLS (the one SDK-specific step ⚠️)
-The game server terminates TLS itself on :8080 for WebTransport. The bundled dev cert only works for `localhost`/`local.hytopiahosting.com`. For `game.cubit.cash` you must give the SDK a **real cert** (Let's Encrypt):
+### 5. Game-server TLS — inject a real cert into the SDK (the SDK-specific step ⚠️)
+The game server terminates TLS itself on :8080 for WebTransport, but the npm
+`hytopia` SDK **hardcodes** a `*.hytopiahosting.com` cert (as string literals
+`$k`/`Zk` in `node_modules/hytopia/server.mjs`), so browsers reject it on
+`game.cubit.cash`. The Caddyfile's `game.cubit.cash` block makes Caddy obtain &
+auto-renew a real Let's Encrypt cert; `inject-game-cert.js` swaps it into the SDK
+(covers both the HTTPS/2 and WebTransport servers — they share `$k`/`Zk`):
 ```bash
-sudo certbot certonly --standalone -d game.cubit.cash   # → /etc/letsencrypt/live/game.cubit.cash/
+node /opt/cubit/deploy/inject-game-cert.js     # patch server.mjs with the LE cert
+sudo systemctl restart cubit-game
+# Auto-renew: re-inject + restart only when Caddy renews the cert (daily check)
+sudo cp deploy/systemd/cubit-cert-renew.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now cubit-cert-renew.timer
 ```
-Then point the server's SSL at that cert/key. This is engine-internal (the HYTOPIA SDK / your `hytopia-source` server SSL config — see CLAUDE.md "Deploying to your own domain"). Verify with the client at `https://play.cubit.cash/?join=game.cubit.cash:8080` — DevTools → Network should show the `webtransport` connection succeed (not fall back to `ws`).
+Re-run `inject-game-cert.js` after any `bun install` (it restores the SDK file).
+Verify: `echo | openssl s_client -connect game.cubit.cash:8080 -alpn h2 | openssl x509 -noout -subject` → `CN = game.cubit.cash`, `Verify return code: 0 (ok)`.
 
 ---
 
 ## Operations
 - **Logs:** `journalctl -u cubit-game -f` · `journalctl -u cubit-backend -f`
-- **Restart after deploy:** `git pull && bun install && bash deploy/build-client.sh && sudo systemctl restart cubit-backend cubit-game`
+- **Restart after deploy:** `git pull && bun install && node deploy/inject-game-cert.js && bash deploy/build-client.sh && sudo systemctl restart cubit-backend cubit-game` (the `inject` re-applies the game cert that `bun install` reverts)
 - **Backups (critical — accounts live here):** the only state is `backend/data.sqlite`. With WAL on, checkpoint + copy:
   ```bash
   sqlite3 /opt/cubit/backend/data.sqlite "PRAGMA wal_checkpoint(TRUNCATE);"

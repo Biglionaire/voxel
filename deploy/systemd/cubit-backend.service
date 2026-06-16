@@ -11,8 +11,10 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/cubit/backend
-# EnvironmentFile holds CUBIT_SECRET, PORT, CUBIT_GAME_URL (see deploy/.env.example)
+# EnvironmentFile holds CUBIT_SECRET, CUBIT_GAME_URL (see deploy/.env.example)
 EnvironmentFile=/opt/cubit/deploy/.env
+# Port pinned here (NOT in .env, which the game server also loads).
+Environment=PORT=3001
 ExecStart=/root/.bun/bin/bun server.ts
 Restart=always
 RestartSec=3

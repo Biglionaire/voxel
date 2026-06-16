@@ -1,0 +1,10 @@
+# Re-inject the renewed game.cubit.cash cert into the HYTOPIA SDK when Caddy
+# renews it. Triggered by cubit-cert-renew.timer (daily). Install:
+#   sudo cp deploy/systemd/cubit-cert-renew.* /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cubit-cert-renew.timer
+[Unit]
+Description=Re-inject renewed game.cubit.cash cert into HYTOPIA SDK
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cubit/deploy/renew-game-cert.sh

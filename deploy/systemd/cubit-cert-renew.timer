@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily check for a renewed game.cubit.cash cert
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

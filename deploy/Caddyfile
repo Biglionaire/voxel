@@ -22,5 +22,13 @@ play.cubit.cash {
 	file_server
 }
 
+# ── game.cubit.cash cert holder ──────────────────────────────────────────────
+# The game server has its OWN TLS on :8080 (WebTransport). This block exists only
+# so Caddy obtains & auto-renews the game.cubit.cash cert, which is then injected
+# into the SDK by deploy/inject-game-cert.js (the SDK hardcodes its cert).
+game.cubit.cash {
+	redir https://play.cubit.cash{uri}
+}
+
 # Players land on https://cubit.cash → sign up / log in → /play redirects to
 # https://play.cubit.cash/?join=game.cubit.cash:8080 (set as CUBIT_GAME_URL).
