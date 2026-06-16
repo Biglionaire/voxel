@@ -20,6 +20,8 @@ const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /* ---------------- Database ---------------- */
 const db = new Database('data.sqlite');
+db.run('PRAGMA journal_mode = WAL');   // concurrent reads while writing — keeps autosave bursts fast
+db.run('PRAGMA synchronous = NORMAL'); // safe with WAL; avoids fsync per write
 db.run(`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL,
