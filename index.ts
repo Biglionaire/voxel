@@ -354,8 +354,12 @@ startServer(world => {
     const x0 = cx - W, x1 = cx + W, z0 = cz - D, z1 = cz + D;
     const mat = pick([3 /* bricks */, BLOCK.STONE, BLOCK.COBBLESTONE, BLOCK.ANDESITE]);
     const top = gy + floors * FH;
+    // Foundation reaches down to the lowest ground under the footprint, so a building
+    // at a coast / drop-off doesn't float over a gap on its exposed side.
+    let base = gy - 3;
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) base = Math.min(base, heightAt(x, z));
     for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
-      for (let y = gy - 3; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);   // foundation
+      for (let y = base; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);     // foundation (down to solid ground)
       for (let y = gy + 1; y <= top + 2; y++) setB(x, y, z, 0);             // hollow shell
     }
     for (let y = gy + 1; y <= top; y++) {
@@ -408,7 +412,9 @@ startServer(world => {
   function buildCity(cx: number, cz: number): { gy: number; towers: { x: number; z: number; floors: number }[] } {
     const gy = heightAt(cx, cz);
     const half = 18;
-    for (let x = cx - half; x <= cx + half; x++) for (let z = cz - half; z <= cz + half; z++) { // level the plot
+    // Level the plot to a flat paved platform: carve hills above gy, fill valleys/water
+    // up to gy so the whole footprint is solid (no gaps), pave the top with andesite.
+    for (let x = cx - half; x <= cx + half; x++) for (let z = cz - half; z <= cz + half; z++) {
       const h = heightAt(x, z);
       if (h > gy) for (let y = gy + 1; y <= h; y++) setB(x, y, z, 0);
       if (h < gy) for (let y = h + 1; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);
@@ -446,34 +452,47 @@ startServer(world => {
     { type: 'tavern', label: 'Tavern', emoji: '🍺' },
   ];
   {
-    const cands = landColumns.filter(c => Math.abs(c.x) < 58 && Math.abs(c.z) < 58 && c.biome !== 'mountain');
+    const cands = landColumns.filter(c => Math.abs(c.x) < 74 && Math.abs(c.z) < 74 && c.biome !== 'mountain');
     const farFromVillages = (c: { x: number; z: number }) =>
       !villageCenters.some(v => Math.hypot(v.x - c.x, v.z - c.z) < 42); // keep city plot off village plots
-    let site: { x: number; z: number } | null = null;
-    for (let attempt = 0; attempt < 800 && !site; attempt++) {
-      const c = cands[Math.floor(Math.random() * cands.length)];
-      if (!c) break;
-      // City levels its own plot, so only the core needs to be roughly flat land.
-      if (flatEnough(c.x, c.z, 9, 10) && farFromVillages(c)) site = { x: c.x, z: c.z };
-    }
-    if (!site) {
-      // Fallback: the city force-levels its own plot, so rather than fail to place a
-      // city at all, pick the flattest available candidate (smallest height spread).
-      const spread = (cx: number, cz: number) => {
-        let lo = Infinity, hi = -Infinity;
-        for (let x = cx - 9; x <= cx + 9; x += 3) for (let z = cz - 9; z <= cz + 9; z += 3) {
-          const h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h);
-        }
-        return hi - lo;
-      };
+    // Validate the WHOLE plot (radius ~= half, not just the core) so a river/coast can't
+    // cut a water trench through the city. plotIsLand rejects any water/mountain column.
+    const RAD = 18;
+    // The rongga is WATER cutting through the plot; hills get leveled flat, so only reject
+    // water columns here (flatness is handled separately by the spread score below).
+    const plotIsLand = (cx: number, cz: number) => {
+      for (let x = cx - RAD; x <= cx + RAD; x += 2) for (let z = cz - RAD; z <= cz + RAD; z += 2) {
+        if (heightAt(x, z) <= SEA_LEVEL + 1) return false; // any water inside the plot
+      }
+      return true;
+    };
+    const spread = (cx: number, cz: number) => {
+      let lo = Infinity, hi = -Infinity;
+      for (let x = cx - RAD; x <= cx + RAD; x += 3) for (let z = cz - RAD; z <= cz + RAD; z += 3) {
+        const h = heightAt(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      return hi - lo;
+    };
+    const pickFlattest = (filter: (c: { x: number; z: number }) => boolean) => {
       let best: { x: number; z: number } | null = null, bestScore = Infinity;
       for (const c of cands) {
-        if (!farFromVillages(c)) continue;
+        if (!farFromVillages(c) || !filter(c)) continue;
         const s = spread(c.x, c.z);
         if (s < bestScore) { bestScore = s; best = c; }
       }
-      if (best) { site = best; console.log(`[world] city: fallback to flattest site (spread ${bestScore})`); }
+      return best ? { site: best, score: bestScore } : null;
+    };
+    let site: { x: number; z: number } | null = null;
+    // Strict: a fully-land plot that's already quite flat (minimal carving → no cliffs).
+    for (let attempt = 0; attempt < 1200 && !site; attempt++) {
+      const c = cands[Math.floor(Math.random() * cands.length)];
+      if (!c) break;
+      if (plotIsLand(c.x, c.z) && spread(c.x, c.z) <= 10 && farFromVillages(c)) site = { x: c.x, z: c.z };
     }
+    // Relax flatness but KEEP the all-land requirement (avoid any water in the city).
+    if (!site) { const r = pickFlattest(c => plotIsLand(c.x, c.z)); if (r) { site = r.site; console.log(`[world] city: flattest all-land site (spread ${r.score})`); } }
+    // Last resort: flattest anywhere (may touch water) — better a city than none.
+    if (!site) { const r = pickFlattest(() => true); if (r) { site = r.site; console.log(`[world] city: last-resort site (spread ${r.score}, may touch water)`); } }
     if (site) {
       const r = buildCity(site.x, site.z);
       cityCenter = { x: site.x, z: site.z, gy: r.gy };
