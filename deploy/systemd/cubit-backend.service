@@ -9,11 +9,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=cubit
+User=root
 WorkingDirectory=/opt/cubit/backend
 # EnvironmentFile holds CUBIT_SECRET, PORT, CUBIT_GAME_URL (see deploy/.env.example)
 EnvironmentFile=/opt/cubit/deploy/.env
-ExecStart=/home/cubit/.bun/bin/bun server.ts
+ExecStart=/root/.bun/bin/bun server.ts
 Restart=always
 RestartSec=3
 # SQLite data lives in WorkingDirectory (data.sqlite). Keep it writable + backed up.

@@ -12,13 +12,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=cubit
+User=root
 WorkingDirectory=/opt/cubit
 EnvironmentFile=/opt/cubit/deploy/.env
 # toktx (installed by setup.sh under $KTX_HOME=/opt/ktx)
-Environment=PATH=/home/cubit/.bun/bin:/opt/ktx/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/root/.bun/bin:/opt/ktx/bin:/usr/local/bin:/usr/bin:/bin
 Environment=LD_LIBRARY_PATH=/opt/ktx/lib
-ExecStart=/home/cubit/.bun/bin/bun run node_modules/.bin/hytopia run index.ts
+ExecStart=/root/.bun/bin/bun run node_modules/.bin/hytopia run index.ts
 Restart=always
 RestartSec=5
 # The SDK serves HTTPS + WebTransport directly on :8080 — open TCP+UDP 8080.
