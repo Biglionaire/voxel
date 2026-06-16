@@ -1275,6 +1275,10 @@ startServer(world => {
         handleShopUI(player, data);
         if (data?.type === 'auth') tryAuth(player, pe, data.mode, data.username, data.password, data.hair);
         if (data?.type === 'menu-action') handleMenuAction(player, data.action);
+        if (data?.type === 'toggle-flat') {
+          const pe2 = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
+          if (pe2) (inFlatland(pe2.position.x, pe2.position.z) ? exitFlatland : enterFlatland)(player);
+        }
       });
     } catch (e) { console.warn('ui hook error', e); }
 
@@ -1318,10 +1322,24 @@ startServer(world => {
   });
 
   /* --- Commands ----------------------------------------------------- */
-  world.chatManager.registerCommand('/home', player => {
-    if (driving.has(player)) world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => dismount(player, e as PlayerEntity));
-    world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.setPosition(spawn));
-  });
+  const enterFlatland = (player: any) => {
+    const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined; if (!pe) return;
+    if (driving.has(player)) dismount(player, pe);
+    ['cobblestone', 'stone', 'bricks', 'oak-log', 'sand', 'grass-block'].forEach(b => addItem(player, b, 64));
+    Object.keys(PROP_MODELS).forEach(p => addItem(player, p, 16));
+    pe.setPosition(flatSpawn);
+    world.chatManager.sendPlayerMessage(player, '🏗️ Welcome to the Flatland — build freely! Full kit added. /home or the button to return.', 'FFE066');
+    toast(player, '🏗️ Flatland — build freely!');
+    try { player.ui.sendData({ type: 'zone', flat: true }); } catch {}
+  };
+  const exitFlatland = (player: any) => {
+    const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined; if (!pe) return;
+    if (driving.has(player)) dismount(player, pe);
+    pe.setPosition(spawn);
+    toast(player, '🏠 Back to the world');
+    try { player.ui.sendData({ type: 'zone', flat: false }); } catch {}
+  };
+  world.chatManager.registerCommand('/home', exitFlatland);
   world.chatManager.registerCommand('/heal', player => { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, 'Healed to full.', '66FF66'); });
   world.chatManager.registerCommand('/give', player => { COLLECTIBLES.forEach(n => addItem(player, n, 1)); world.chatManager.sendPlayerMessage(player, 'Gave one of each item.', 'FFE066'); });
   world.chatManager.registerCommand('/hair', (player, args) => {
@@ -1331,14 +1349,7 @@ startServer(world => {
     applyHair(player, pe, n); saveProfile(player);
     world.chatManager.sendPlayerMessage(player, n === 0 ? `💇 Bald. (/hair 1–${HAIR_COUNT} to pick a style)` : `💇 Hair style ${n}/${HAIR_COUNT} equipped.`, 'FFE066');
   });
-  world.chatManager.registerCommand('/build', player => {
-    if (driving.has(player)) world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => dismount(player, e as PlayerEntity));
-    ['cobblestone', 'stone', 'bricks', 'oak-log', 'sand', 'grass-block'].forEach(b => addItem(player, b, 64));
-    Object.keys(PROP_MODELS).forEach(p => addItem(player, p, 16));
-    world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.setPosition(flatSpawn));
-    world.chatManager.sendPlayerMessage(player, '🏗️ Welcome to the Flatland — build freely here! Full kit added. Type /home to return to the world.', 'FFE066');
-    toast(player, '🏗️ Flatland — build freely!');
-  });
+  world.chatManager.registerCommand('/build', enterFlatland);
   world.chatManager.registerCommand('/time', player => world.chatManager.sendPlayerMessage(player, `It is ${night ? 'night' : 'day'} (t=${timeOfDay.toFixed(2)}).`));
 
   /* --- City building services (marketplace, clinic, …) ------------- */
