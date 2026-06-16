@@ -567,6 +567,9 @@ startServer(world => {
   const gunEntity = new Map<any, Entity>();     // player -> held gun entity (when equipped)
   const rodEntity = new Map<any, Entity>();     // player -> held fishing-rod entity (while casting)
   const fishingFx = new Map<any, { bobber: Entity | null; line: Entity[]; iv: any }>(); // cast bobber + line beads
+  const hairEntity = new Map<any, Entity>();    // player -> hair cosmetic child entity (on the head)
+  const cosmeticOf = new Map<any, { hair: number }>(); // chosen avatar cosmetics per player
+  const HAIR_COUNT = 10;                        // hair-0001 .. hair-0010 (0 = bald)
   const lastBuild = new Map<any, number>();     // build/break rate limit
   const selectedSlot = new Map<any, number>();  // selected hotbar slot index
   const placedProps = new Set<Entity>();        // player-placed furniture/structure entities
@@ -1059,6 +1062,22 @@ startServer(world => {
     }, 55);
   }
 
+  /* --- Avatar cosmetics: hair as a child entity on the head-anchor (the same
+   * pattern the SDK uses for platform cosmetics). hairId 0 = bald, 1..10 = styles.
+   * Skin/outfit need atlas compositing (deferred); paid cosmetics come post-on-chain. */
+  function applyHair(player: any, pe: PlayerEntity, hairId: number) {
+    hairId = Math.max(0, Math.min(HAIR_COUNT, Math.floor(hairId) || 0));
+    try { hairEntity.get(player)?.despawn(); } catch {} hairEntity.delete(player);
+    cosmeticOf.set(player, { hair: hairId });
+    if (hairId < 1) return; // bald
+    try {
+      const hair = new Entity({ name: 'Hair', modelUri: `models/players/hair/hair-${String(hairId).padStart(4, '0')}.gltf`,
+        modelScale: 1, parent: pe, parentNodeName: 'head-anchor' });
+      hair.spawn(world, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 });
+      hairEntity.set(player, hair);
+    } catch (e) { console.warn('hair error', e); }
+  }
+
   /* --- Player input handler (attack / build / interact / eat) ------ */
   function handleInput(player: any, pe: PlayerEntity, input: Record<string, boolean>) {
     const prev = lastInput.get(player) ?? {};
@@ -1286,8 +1305,9 @@ startServer(world => {
     try { gunEntity.get(player)?.despawn(); } catch {}
     gunEntity.delete(player);
     try { rodEntity.get(player)?.despawn(); } catch {}
+    try { hairEntity.get(player)?.despawn(); } catch {}
     clearLine(player);
-    rodEntity.delete(player); fishing.delete(player);
+    rodEntity.delete(player); hairEntity.delete(player); cosmeticOf.delete(player); fishing.delete(player);
     world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.despawn());
   });
 
@@ -1304,6 +1324,13 @@ startServer(world => {
   });
   world.chatManager.registerCommand('/heal', player => { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, 'Healed to full.', '66FF66'); });
   world.chatManager.registerCommand('/give', player => { COLLECTIBLES.forEach(n => addItem(player, n, 1)); world.chatManager.sendPlayerMessage(player, 'Gave one of each item.', 'FFE066'); });
+  world.chatManager.registerCommand('/hair', (player, args) => {
+    const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
+    if (!pe) return;
+    const n = Math.max(0, Math.min(HAIR_COUNT, parseInt(args[0] ?? '', 10) || 0));
+    applyHair(player, pe, n); saveProfile(player);
+    world.chatManager.sendPlayerMessage(player, n === 0 ? `💇 Bald. (/hair 1–${HAIR_COUNT} to pick a style)` : `💇 Hair style ${n}/${HAIR_COUNT} equipped.`, 'FFE066');
+  });
   world.chatManager.registerCommand('/build', player => {
     if (driving.has(player)) world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => dismount(player, e as PlayerEntity));
     ['cobblestone', 'stone', 'bricks', 'oak-log', 'sand', 'grass-block'].forEach(b => addItem(player, b, 64));
@@ -1482,6 +1509,7 @@ startServer(world => {
           if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp);
           world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
         }
+        applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0)); // restore avatar look
       } catch {}
       if (mode === 'signup') {
         // Signup bonus: 1000 coins. TEMPORARY placeholder — to be replaced by an
@@ -1505,7 +1533,7 @@ startServer(world => {
     try {
       await fetch(`${CUBIT_BACKEND}/api/profile`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP } }),
+        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP, cosmetic: cosmeticOf.get(player) ?? { hair: 0 } } }),
       });
     } catch {}
   }
