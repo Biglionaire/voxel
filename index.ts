@@ -566,6 +566,7 @@ startServer(world => {
   const mountCooldown = new Map<any, number>(); // prevents instant re-mount after exit
   const gunEntity = new Map<any, Entity>();     // player -> held gun entity (when equipped)
   const rodEntity = new Map<any, Entity>();     // player -> held fishing-rod entity (while casting)
+  const bobberEntity = new Map<any, Entity>();  // player -> floating bobber on the water (while casting)
   const lastBuild = new Map<any, number>();     // build/break rate limit
   const selectedSlot = new Map<any, number>();  // selected hotbar slot index
   const placedProps = new Set<Entity>();        // player-placed furniture/structure entities
@@ -970,6 +971,43 @@ startServer(world => {
     } catch {}
   }
 
+  /* --- Fishing visual effects (bobber float + a fish leaping on the strike) -- */
+  // Rare fish item names match their model names; cod/salmon use their item models.
+  const FISH_MODEL: Record<string, string> = { 'cod-raw': 'models/items/cod-raw.gltf', 'salmon-raw': 'models/items/salmon-raw.gltf' };
+  const fishModelFor = (item: string) => FISH_MODEL[item] ?? `models/npcs/fish/${item}.gltf`;
+
+  function spawnBobber(player: any, wx: number, wz: number) {
+    try { bobberEntity.get(player)?.despawn(); } catch {}
+    try {
+      const bob = new Entity({ name: 'Bobber', modelUri: 'models/items/snowball.gltf', modelScale: 0.3,
+        rigidBodyOptions: { type: RigidBodyType.KINEMATIC_POSITION }, modelPreferredShape: ColliderShape.NONE });
+      bob.spawn(world, { x: wx, y: SEA_LEVEL + 1.0, z: wz });
+      bobberEntity.set(player, bob);
+    } catch (e) { console.warn('bobber error', e); }
+    try { new Audio({ uri: 'audio/sfx/liquid/splash-03.mp3', volume: 0.5 }).play(world); } catch {}
+  }
+  function clearBobber(player: any) { try { bobberEntity.get(player)?.despawn(); } catch {} bobberEntity.delete(player); }
+
+  // A fish leaps out of the water at (wx,wz) and arcs up toward the player as it's reeled in.
+  function fishStrike(player: any, pe: PlayerEntity, wx: number, wz: number, item: string) {
+    try { new Audio({ uri: 'audio/sfx/liquid/large-splash.mp3', volume: 0.7 }).play(world); } catch {}
+    let fish: Entity;
+    try {
+      fish = new Entity({ name: 'CatchFX', modelUri: fishModelFor(item), modelScale: 0.7,
+        rigidBodyOptions: { type: RigidBodyType.KINEMATIC_POSITION }, modelPreferredShape: ColliderShape.NONE });
+      fish.spawn(world, { x: wx, y: SEA_LEVEL + 0.6, z: wz });
+    } catch { return; }
+    const sy = SEA_LEVEL + 0.6, ex = pe.position.x, ey = pe.position.y + 1.1, ez = pe.position.z;
+    let t = 0; const steps = 12;
+    const iv = setInterval(() => {
+      t++; const f = t / steps;
+      const x = wx + (ex - wx) * f, z = wz + (ez - wz) * f;
+      const y = sy + (ey - sy) * f + 2.6 * Math.sin(Math.PI * f); // arc up, then down into the player's hands
+      try { fish.setPosition({ x, y, z }); } catch {}
+      if (t >= steps) { clearInterval(iv); try { fish.despawn(); } catch {} }
+    }, 55);
+  }
+
   /* --- Player input handler (attack / build / interact / eat) ------ */
   function handleInput(player: any, pe: PlayerEntity, input: Record<string, boolean>) {
     const prev = lastInput.get(player) ?? {};
@@ -993,8 +1031,8 @@ startServer(world => {
       const inv = getInv(player);
       const rodLv = (inv.get('fishing-rod-3') ?? 0) > 0 ? 3 : (inv.get('fishing-rod-2') ?? 0) > 0 ? 2 : (inv.get('fishing-rod') ?? 0) > 0 ? 1 : 0;
       if (rodLv > 0) {
-        let nearWater = false; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
-        for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; break; }
+        let nearWater = false, wx = pe.position.x, wz = pe.position.z; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
+        for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; wx = bx + dx + 0.5; wz = bz + dz + 0.5; break; }
         if (!nearWater) { world.chatManager.sendPlayerMessage(player, '🎣 Stand near water — head to a fishing pier or the shore.', 'FF8844'); toast(player, '🎣 Stand closer to water'); }
         else if ((inv.get('bait') ?? 0) <= 0) {
           world.chatManager.sendPlayerMessage(player, '🪱 Out of bait — buy some at the Marketplace (R).', 'FF8844');
@@ -1005,6 +1043,7 @@ startServer(world => {
           fishing.add(player);
           world.chatManager.sendPlayerMessage(player, '🎣 Cast! Waiting for a bite…', '88CCFF');
           toast(player, '🎣 Cast — reeling…');
+          spawnBobber(player, wx, wz); // floating bobber lands on the water with a plop
           // Show the rod in the player's hand for the duration (same held-entity pattern as the gun).
           try {
             rodEntity.get(player)?.despawn();
@@ -1016,14 +1055,14 @@ startServer(world => {
           const rareChance = 0.1 + rodLv * 0.12;
           const delay = Math.max(1500, 4000 - rodLv * 600 + Math.random() * 2500);
           setTimeout(() => {
-            try { rodEntity.get(player)?.despawn(); } catch {} rodEntity.delete(player);
+            try { rodEntity.get(player)?.despawn(); } catch {} rodEntity.delete(player); clearBobber(player);
             if (!fishing.has(player)) return;
             fishing.delete(player);
             const roll = Math.random();
             const fish = roll < rareChance ? pick(['pufferfish', 'clownfish', 'catfish', 'parrotfish', 'lionfish', 'sailfish', 'swordfish', 'anglerfish'])
               : roll < rareChance + 0.4 ? 'salmon-raw' : 'cod-raw';
             addItem(player, fish);
-            new Audio({ uri: 'audio/sfx/liquid/splash-01.mp3', volume: 0.6 }).play(world);
+            fishStrike(player, pe, wx, wz, fish); // the fish leaps from the water with a splash
             world.chatManager.sendPlayerMessage(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`, '88FF88');
             toast(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`);
           }, delay);
@@ -1190,7 +1229,8 @@ startServer(world => {
     try { gunEntity.get(player)?.despawn(); } catch {}
     gunEntity.delete(player);
     try { rodEntity.get(player)?.despawn(); } catch {}
-    rodEntity.delete(player); fishing.delete(player);
+    try { bobberEntity.get(player)?.despawn(); } catch {}
+    rodEntity.delete(player); bobberEntity.delete(player); fishing.delete(player);
     world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.despawn());
   });
 
