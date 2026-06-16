@@ -21,3 +21,7 @@ assets/skyboxes/
 .DS_Store
 *.log
 backend/data.sqlite*
+
+# Production deploy: secrets + built client (deploy/ scaffolding IS tracked)
+deploy/.env
+/client-dist/

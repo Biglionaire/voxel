@@ -1,0 +1,22 @@
+# CUBIT auth backend (Bun + SQLite). Install:
+#   sudo cp deploy/systemd/cubit-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cubit-backend
+# Adjust User/WorkingDirectory/paths to match your server.
+[Unit]
+Description=CUBIT auth backend (Bun + SQLite)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cubit
+WorkingDirectory=/opt/cubit/backend
+# EnvironmentFile holds CUBIT_SECRET, PORT, CUBIT_GAME_URL (see deploy/.env.example)
+EnvironmentFile=/opt/cubit/deploy/.env
+ExecStart=/home/cubit/.bun/bin/bun server.ts
+Restart=always
+RestartSec=3
+# SQLite data lives in WorkingDirectory (data.sqlite). Keep it writable + backed up.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+# CUBIT — Caddy reverse proxy + automatic Let's Encrypt TLS.
+# Install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# Caddy fronts the STATIC CLIENT and the BACKEND API only.
+# The GAME SERVER (:8080) is NOT proxied here — it terminates its own TLS and
+# speaks WebTransport/HTTP3 (QUIC/UDP), which a reverse proxy can't pass through.
+# Point game.example.com straight at the VPS (A record) and open TCP+UDP 8080.
+
+# ── Static game client ───────────────────────────────────────────────────────
+play.example.com {
+	encode zstd gzip
+	root * /opt/cubit/client-dist
+	try_files {path} /index.html
+	file_server
+}
+
+# ── Auth backend (Bun on :3001) ──────────────────────────────────────────────
+api.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3001
+}
+
+# Note: the backend already sends permissive CORS headers, so the client on
+# play.example.com can call api.example.com directly.
