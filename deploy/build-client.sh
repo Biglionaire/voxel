@@ -26,5 +26,5 @@ npm run build   # → dist/
 
 rm -rf "$OUT_DIR"
 cp -r dist "$OUT_DIR"
-echo "==> Client built → $OUT_DIR (served by Caddy at play.example.com)"
-echo "    Players open:  https://play.example.com/?join=game.example.com:8080"
+echo "==> Client built → $OUT_DIR (served by Caddy at play.cubit.cash)"
+echo "    Players land on https://cubit.cash → login → /play → play.cubit.cash/?join=game.cubit.cash:8080"

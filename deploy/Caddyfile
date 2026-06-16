@@ -1,23 +1,26 @@
-# CUBIT — Caddy reverse proxy + automatic Let's Encrypt TLS.
+# CUBIT — Caddy reverse proxy + automatic Let's Encrypt TLS (cubit.cash).
 # Install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
-# Caddy fronts the STATIC CLIENT and the BACKEND API only.
-# The GAME SERVER (:8080) is NOT proxied here — it terminates its own TLS and
-# speaks WebTransport/HTTP3 (QUIC/UDP), which a reverse proxy can't pass through.
-# Point game.example.com straight at the VPS (A record) and open TCP+UDP 8080.
+#
+# Caddy fronts the BACKEND/landing and the STATIC CLIENT only.
+# The GAME SERVER (game.cubit.cash:8080) is NOT proxied here — it terminates its
+# own TLS and speaks WebTransport/HTTP3 (QUIC/UDP), which a reverse proxy can't
+# pass through. Point game.cubit.cash straight at the VPS (A record, DNS-only)
+# and open TCP+UDP 8080.
 
-# ── Static game client ───────────────────────────────────────────────────────
-play.example.com {
+# ── Backend + landing/login (Bun on :3001) ───────────────────────────────────
+# Apex is the front door: landing page at /, API at /api/*, /play redirect.
+cubit.cash, www.cubit.cash {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3001
+}
+
+# ── Static game client (hytopia-source build) ────────────────────────────────
+play.cubit.cash {
 	encode zstd gzip
 	root * /opt/cubit/client-dist
 	try_files {path} /index.html
 	file_server
 }
 
-# ── Auth backend (Bun on :3001) ──────────────────────────────────────────────
-api.example.com {
-	encode zstd gzip
-	reverse_proxy 127.0.0.1:3001
-}
-
-# Note: the backend already sends permissive CORS headers, so the client on
-# play.example.com can call api.example.com directly.
+# Players land on https://cubit.cash → sign up / log in → /play redirects to
+# https://play.cubit.cash/?join=game.cubit.cash:8080 (set as CUBIT_GAME_URL).
