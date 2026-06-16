@@ -17,15 +17,61 @@
   </div>
 
   <div id="gun-indicator" class="panel">🔫 AK-47</div>
+  <div id="hint" class="panel">🏪 <b>R</b> Shop · 🎣 <b>X</b> Fish</div>
   <div id="inventory"></div>
   <div id="crosshair"></div>
   <div id="hurt"></div>
   <div id="toast"></div>
+  <div id="building-prompt"></div>
+</div>
+
+<!-- Login / signup overlay (shown on join) -->
+<div id="auth">
+  <div class="auth-panel">
+    <div class="auth-logo">CUBIT</div>
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="atab-login">Log in</div>
+      <div class="auth-tab" id="atab-signup">Sign up</div>
+    </div>
+    <input id="auth-user" placeholder="Username" autocomplete="username" />
+    <input id="auth-pass" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="auth-go" type="button">Enter</button>
+    <button id="auth-guest" type="button" class="ghost">Play as guest</button>
+    <div id="auth-msg"></div>
+  </div>
+</div>
+
+<!-- Marketplace modal (interactive — outside #hud so it can receive clicks) -->
+<div id="shop">
+  <div class="shop-panel">
+    <div class="shop-head">
+      <span class="shop-title">🏪 Marketplace</span>
+      <span id="shop-gold">🪙 0</span>
+      <button id="shop-close" type="button">✕</button>
+    </div>
+    <div class="shop-tabs" id="shop-tabs"></div>
+    <div class="shop-list" id="shop-list"></div>
+    <div class="shop-foot">Press <b>R</b> or ✕ to close</div>
+  </div>
+</div>
+
+<!-- Clinic / Tavern menu page -->
+<div id="menu">
+  <div class="menu-panel">
+    <div class="menu-head"><span id="menu-title"></span><span id="menu-gold"></span><button id="menu-close" type="button">✕</button></div>
+    <div id="menu-hp"></div>
+    <div id="menu-buttons"></div>
+  </div>
 </div>
 
 <!-- Floating mob health bar template (rendered in 3D space via SceneUI) -->
 <template id="mob-health-template">
   <div class="mob-hp"><div class="mob-hp-fill"></div></div>
+</template>
+
+<!-- Floating city-building label -->
+<template id="building-label-template">
+  <div class="bldg-label"></div>
 </template>
 
 <script>
@@ -73,7 +119,7 @@
     }
 
     if (data.type === 'time') {
-      phaseEl.textContent = data.phase === 'night' ? '🌙 Night' : '☀️ Day';
+      phaseEl.textContent = (data.phase === 'night' ? '🌙' : '☀️') + ' ' + (data.label || '');
       timeFill.style.width = Math.round((data.t || 0) * 100) + '%';
     }
 
@@ -84,7 +130,76 @@
     if (data.type === 'gun') {
       gunEl.style.display = data.equipped ? 'block' : 'none';
     }
+
+    if (data.type === 'building') {
+      const p = document.getElementById('building-prompt');
+      p.textContent = data.label ? (data.label + (data.shop ? ' — press R to trade' : '')) : '';
+      p.style.opacity = data.label ? '1' : '0';
+    }
+
+    if (data.type === 'shop') {
+      const shop = document.getElementById('shop');
+      if (!data.open) { shop.style.display = 'none'; return; }
+      shopCats = data.cats || {};
+      document.getElementById('shop-gold').textContent = '🪙 ' + (data.gold || 0);
+      renderShop();
+      shop.style.display = 'flex';
+    }
+
+    if (data.type === 'menu') {
+      const menu = document.getElementById('menu');
+      if (!data.open) { menu.style.display = 'none'; return; }
+      document.getElementById('menu-title').textContent = data.title || '';
+      document.getElementById('menu-gold').textContent = '🪙 ' + (data.gold || 0);
+      document.getElementById('menu-hp').textContent = '❤️ ' + Math.round(data.hp || 0) + ' HP';
+      const mb = document.getElementById('menu-buttons'); mb.innerHTML = '';
+      (data.buttons || []).forEach(b => { const el = document.createElement('button'); el.type = 'button'; el.className = 'menu-btn'; el.textContent = b.label; el.onclick = () => hytopia.sendData({ type: 'menu-action', action: b.action }); mb.appendChild(el); });
+      menu.style.display = 'flex';
+    }
+
+    if (data.type === 'auth-required') document.getElementById('auth').style.display = 'flex';
+    if (data.type === 'auth-ok') { document.getElementById('auth').style.display = 'none'; }
+    if (data.type === 'auth-err') { const m = document.getElementById('auth-msg'); m.textContent = data.msg || 'Failed.'; m.className = 'err'; document.getElementById('auth-go').disabled = false; }
   });
+
+  // Shop with category tabs
+  let shopCats = {}, activeTab = 'items';
+  const TAB_LABELS = { items: '📦 Items', vehicles: '🚗 Vehicles', fishing: '🎣 Fishing', health: '❤️ Health', sell: '💰 Sell' };
+  function renderShop() {
+    const tabsEl = document.getElementById('shop-tabs'); tabsEl.innerHTML = '';
+    const cats = Object.keys(shopCats);
+    if (!cats.includes(activeTab)) activeTab = cats[0] || 'items';
+    cats.forEach(cat => {
+      const t = document.createElement('div'); t.className = 'shop-tab' + (cat === activeTab ? ' active' : '');
+      t.textContent = TAB_LABELS[cat] || cat; t.onclick = () => { activeTab = cat; renderShop(); };
+      tabsEl.appendChild(t);
+    });
+    const listEl = document.getElementById('shop-list'); listEl.innerHTML = '';
+    const isSell = activeTab === 'sell';
+    (shopCats[activeTab] || []).forEach(r => {
+      const row = document.createElement('button'); row.type = 'button'; row.className = 'shop-row';
+      row.innerHTML = '<span class="si">' + (r.emoji || '📦') + '</span><span class="sn">' + r.item.replace(/-/g, ' ') +
+        '</span><span class="sh">x' + r.have + '</span><span class="sp">' + (isSell ? 'sell' : 'buy') + ' ' + r.price + '🪙</span>';
+      row.onclick = () => hytopia.sendData({ type: isSell ? 'sell' : 'buy', item: r.item });
+      listEl.appendChild(row);
+    });
+  }
+
+  document.getElementById('shop-close').addEventListener('click', () => hytopia.sendData({ type: 'shop-close' }));
+  document.getElementById('menu-close').addEventListener('click', () => hytopia.sendData({ type: 'menu-action', action: 'close' }));
+
+  // Auth overlay wiring
+  let authMode = 'login';
+  const setAuthMode = m => { authMode = m; document.getElementById('atab-login').classList.toggle('active', m === 'login'); document.getElementById('atab-signup').classList.toggle('active', m === 'signup'); document.getElementById('auth-go').textContent = m === 'login' ? 'Enter' : 'Create account'; document.getElementById('auth-msg').textContent = ''; };
+  document.getElementById('atab-login').addEventListener('click', () => setAuthMode('login'));
+  document.getElementById('atab-signup').addEventListener('click', () => setAuthMode('signup'));
+  document.getElementById('auth-go').addEventListener('click', () => {
+    const u = document.getElementById('auth-user').value.trim(), p = document.getElementById('auth-pass').value;
+    if (!u || !p) { const m = document.getElementById('auth-msg'); m.textContent = 'Enter username & password.'; m.className = 'err'; return; }
+    document.getElementById('auth-go').disabled = true; document.getElementById('auth-msg').textContent = '…';
+    hytopia.sendData({ type: 'auth', mode: authMode, username: u, password: p });
+  });
+  document.getElementById('auth-guest').addEventListener('click', () => hytopia.sendData({ type: 'auth', mode: 'guest' }));
 
   // Floating mob health bars in 3D space.
   if (hytopia.registerSceneUITemplate) {
@@ -97,6 +212,14 @@
         fill.style.width = pct + '%';
         fill.style.background = pct > 50 ? '#7ed957' : pct > 25 ? '#ffcc33' : '#ff5252';
       });
+      return clone;
+    });
+
+    hytopia.registerSceneUITemplate('building-label', (id, onState) => {
+      const tpl = document.getElementById('building-label-template');
+      const clone = tpl.content.cloneNode(true);
+      const el = clone.querySelector('.bldg-label');
+      onState(state => { el.textContent = state.name || ''; });
       return clone;
     });
   }
@@ -117,6 +240,7 @@
   #hp-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4caf50,#8bc34a); transition: width 0.25s ease, background 0.25s ease; }
 
   #gun-indicator { display: none; bottom: 20px; right: 16px; color: #ffcc33; }
+  #hint { top: 56px; right: 16px; font-size: 12px; opacity: 0.85; }
 
   #inventory { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
   .slot { pointer-events: none; width: 50px; height: 50px; border-radius: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(0,0,0,0.35); position: relative; }
@@ -138,9 +262,65 @@
   #toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(10px); background: rgba(20,140,50,0.92); border-radius: 12px; padding: 8px 20px; font-size: 16px; font-weight: 700; opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  #building-prompt { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); border-radius: 8px; padding: 6px 14px; font-size: 14px; font-weight: 700; opacity: 0; transition: opacity 0.2s ease; text-shadow: 1px 1px 2px #000; }
+
+  /* Marketplace modal */
+  #shop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); pointer-events: auto; font-family: 'Inter', system-ui, sans-serif; color: #fff; z-index: 50; }
+  .shop-panel { width: min(640px, 92vw); max-height: 80vh; background: linear-gradient(160deg, #1c2740, #121826); border: 1px solid rgba(255,255,255,0.18); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow: hidden; display: flex; flex-direction: column; }
+  .shop-head { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); }
+  .shop-title { font-size: 20px; font-weight: 800; flex: 1; }
+  #shop-gold { font-size: 16px; font-weight: 700; color: #ffe066; }
+  #shop-close { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 700; }
+  #shop-close:hover { background: rgba(255,80,80,0.6); }
+  .shop-cols { display: flex; gap: 14px; padding: 16px; overflow-y: auto; }
+  .shop-col { flex: 1; }
+  .shop-col h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.6); }
+  .shop-list { display: flex; flex-direction: column; gap: 6px; }
+  .shop-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 8px 10px; color: #fff; cursor: pointer; font-size: 14px; transition: background 0.12s; }
+  .shop-row:hover { background: rgba(120,200,255,0.22); }
+  .shop-row .si { font-size: 20px; }
+  .shop-row .sn { flex: 1; text-transform: capitalize; }
+  .shop-row .sh { color: rgba(255,255,255,0.5); font-size: 12px; }
+  .shop-row .sp { color: #ffe066; font-weight: 700; font-size: 13px; }
+  .shop-foot { padding: 10px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.5); border-top: 1px solid rgba(255,255,255,0.1); }
+  .shop-tabs { display: flex; gap: 6px; padding: 12px 16px 0; flex-wrap: wrap; }
+  .shop-tab { padding: 7px 12px; border-radius: 9px 9px 0 0; cursor: pointer; font-size: 13px; font-weight: 700; background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.7); }
+  .shop-tab.active { background: rgba(110,200,255,0.2); color: #fff; }
+  #shop-list { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; overflow-y: auto; max-height: 52vh; }
+
+  /* Clinic / Tavern menu */
+  #menu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 55; font-family: 'Inter', system-ui, sans-serif; color: #fff; }
+  .menu-panel { width: min(380px, 92vw); background: linear-gradient(160deg,#241c2e,#15121a); border: 1px solid rgba(255,255,255,0.16); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow: hidden; }
+  .menu-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); }
+  #menu-title { font-size: 19px; font-weight: 800; flex: 1; }
+  #menu-gold { color: #ffe066; font-weight: 700; }
+  #menu-close { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+  #menu-close:hover { background: rgba(255,80,80,0.6); }
+  #menu-hp { padding: 10px 18px 0; font-size: 13px; color: rgba(255,255,255,0.7); }
+  #menu-buttons { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
+  .menu-btn { padding: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.06); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; text-align: left; transition: background 0.12s; }
+  .menu-btn:hover { background: rgba(120,200,255,0.22); }
+
+  /* Login overlay */
+  #auth { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8,12,22,0.82); pointer-events: auto; z-index: 60; font-family: 'Inter', system-ui, sans-serif; color: #fff; }
+  .auth-panel { width: min(340px, 90vw); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 26px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  .auth-logo { font-size: 30px; font-weight: 900; letter-spacing: 0.12em; text-align: center; margin-bottom: 18px; background: linear-gradient(90deg,#ffd56b,#7ed957,#6bc1ff,#ff7ad1); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .auth-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .auth-tab { flex: 1; padding: 8px; border-radius: 9px; text-align: center; cursor: pointer; font-weight: 700; font-size: 13px; background: rgba(255,255,255,0.06); border: 1px solid transparent; }
+  .auth-tab.active { background: rgba(110,200,255,0.18); border-color: rgba(110,200,255,0.5); }
+  #auth input { width: 100%; padding: 11px 12px; margin-bottom: 10px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: #fff; font-size: 15px; outline: none; }
+  #auth input:focus { border-color: #6bc1ff; }
+  #auth-go { width: 100%; padding: 11px; border: none; border-radius: 9px; cursor: pointer; font-size: 15px; font-weight: 800; color: #0e1320; background: linear-gradient(90deg,#ffd56b,#ff9f43); }
+  #auth-go:disabled { opacity: 0.6; }
+  #auth-guest.ghost { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid rgba(255,255,255,0.15); border-radius: 9px; background: transparent; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 13px; }
+  #auth-msg { margin-top: 12px; text-align: center; font-size: 13px; min-height: 16px; }
+  #auth-msg.err { color: #ff7a7a; }
+
   /* Floating mob health bar */
   .mob-hp { width: 46px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.6); border: 1px solid rgba(0,0,0,0.5); overflow: hidden; }
   .mob-hp-fill { height: 100%; width: 100%; background: #7ed957; transition: width 0.15s ease; }
+
+  .bldg-label { white-space: nowrap; font-family: 'Inter', system-ui, sans-serif; font-weight: 800; font-size: 18px; color: #fff; padding: 4px 12px; border-radius: 8px; background: rgba(20,30,50,0.78); border: 1px solid rgba(255,255,255,0.25); text-shadow: 1px 1px 3px rgba(0,0,0,0.9); box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
 </style>
 
 <!-- ===================== MOBILE CONTROLS (boilerplate) ===================== -->

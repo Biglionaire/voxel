@@ -20,3 +20,4 @@ assets/skyboxes/
 # OS / editor
 .DS_Store
 *.log
+backend/data.sqlite*

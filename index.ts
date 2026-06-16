@@ -20,8 +20,10 @@ import {
   DefaultPlayerEntity,
   Entity,
   EntityModelAnimationLoopMode,
+  PlayerCameraMode,
   PlayerEntity,
   PlayerEvent,
+  PlayerUIEvent,
   RigidBodyType,
   SceneUI,
   SimpleEntityController,
@@ -33,12 +35,12 @@ import worldMap from './assets/map.json';
  *  Config
  * ------------------------------------------------------------------ */
 
-const WORLD_RADIUS = 64;
+const WORLD_RADIUS = 96; // expanded world (193×193)
 const SEA_LEVEL = 11;
 const MOUNTAIN_LEVEL = 22;
 const MAX_HP = 100;
-const TOTAL_ITEMS = 28;
-const MOB_COUNT = 10;
+const TOTAL_ITEMS = 40;
+const MOB_COUNT = 16;
 const ATTACK_RANGE = 4;
 const ATTACK_DAMAGE = 34;
 const ATTACK_COOLDOWN_MS = 450;
@@ -76,8 +78,13 @@ function fbm(x: number, z: number): number {
   return sum / norm;
 }
 
-// Tuned (via distribution sim) for ~17% water, ~75% land, ~7% mountains.
-const heightAt = (x: number, z: number) => Math.floor(fbm((x + 1000) * 0.025, (z + 1000) * 0.025) * 30);
+// Tuned for ~17% water inland, with an island falloff so the map edges are all ocean.
+const heightAt = (x: number, z: number) => {
+  let h = fbm((x + 1000) * 0.025, (z + 1000) * 0.025) * 30;
+  const edge = Math.max(Math.abs(x), Math.abs(z)) / WORLD_RADIUS; // 0 = center, 1 = edge
+  if (edge > 0.72) h -= ((edge - 0.72) / 0.28) * 34; // ramp down into deep ocean at the rim
+  return Math.floor(h);
+};
 
 type Biome = 'ocean' | 'beach' | 'desert' | 'plains' | 'forest' | 'mountain';
 function biomeAt(x: number, z: number, h: number): Biome {
@@ -96,17 +103,17 @@ function biomeAt(x: number, z: number, h: number): Biome {
 
 const PROPS: Record<Biome, { uri: string; collide: boolean; chance: number }[]> = {
   plains: [
-    { uri: 'models/environment/Plains/oak-tree-big.gltf', collide: true, chance: 0.018 },
-    { uri: 'models/environment/Plains/oak-tree-medium.gltf', collide: true, chance: 0.018 },
-    { uri: 'models/environment/Plains/flower-tuft.gltf', collide: false, chance: 0.05 },
-    { uri: 'models/environment/Plains/bush-berry.gltf', collide: false, chance: 0.03 },
-    { uri: 'models/environment/Plains/grass-tall.gltf', collide: false, chance: 0.06 },
+    { uri: 'models/environment/Plains/oak-tree-big.gltf', collide: true, chance: 0.01 },
+    { uri: 'models/environment/Plains/oak-tree-medium.gltf', collide: true, chance: 0.01 },
+    { uri: 'models/environment/Plains/flower-tuft.gltf', collide: false, chance: 0.03 },
+    { uri: 'models/environment/Plains/bush-berry.gltf', collide: false, chance: 0.02 },
+    { uri: 'models/environment/Plains/grass-tall.gltf', collide: false, chance: 0.035 },
   ],
   forest: [
-    { uri: 'models/environment/Pine Forest/pine-tree-big.gltf', collide: true, chance: 0.04 },
-    { uri: 'models/environment/Pine Forest/pine-tree-medium.gltf', collide: true, chance: 0.04 },
-    { uri: 'models/environment/Pine Forest/forest-fern.gltf', collide: false, chance: 0.05 },
-    { uri: 'models/environment/Pine Forest/redcap-mushroom-group.gltf', collide: false, chance: 0.02 },
+    { uri: 'models/environment/Pine Forest/pine-tree-big.gltf', collide: true, chance: 0.022 },
+    { uri: 'models/environment/Pine Forest/pine-tree-medium.gltf', collide: true, chance: 0.018 },
+    { uri: 'models/environment/Pine Forest/forest-fern.gltf', collide: false, chance: 0.03 },
+    { uri: 'models/environment/Pine Forest/redcap-mushroom-group.gltf', collide: false, chance: 0.015 },
   ],
   desert: [
     { uri: 'models/environment/Plains/scattered-pebbles.gltf', collide: false, chance: 0.02 },
@@ -128,7 +135,39 @@ const ITEM_EMOJI: Record<string, string> = {
   'grass-block': '🟩', 'grass-block-pine': '🟩', 'grass-flower-block': '🌼', 'grass-flower-block-pine': '🌼',
   stone: '🪨', andesite: '🪨', cobblestone: '🧱', bricks: '🧱', sand: '🟨', 'coal-ore': '⚫',
   'oak-log': '🪵', 'spruce-log': '🪵', 'oak-leaves': '🍃', 'spruce-leaves': '🍃', 'birch-leaves': '🍃', water: '💧',
+  // furniture / structure props (placed as entities)
+  lantern: '🏮', chest: '🧰', bed: '🛏️', fence: '🚧', door: '🚪', window: '🪟',
+  'lamp-post': '💡', bench: '🪑', barrel: '🛢️', torch: '🔥', bookshelf: '📚', crate: '📦',
+  // fishing
+  'fishing-rod': '🎣', 'fishing-rod-2': '🎣', 'fishing-rod-3': '🎏', bait: '🪱', pickup: '🚗',
+  'cod-raw': '🐟', 'cod-cooked': '🍤', 'salmon-raw': '🐠', 'salmon-cooked': '🍣',
+  pufferfish: '🐡', clownfish: '🐠', catfish: '🐟', parrotfish: '🐠', lionfish: '🐟', sailfish: '🐟', swordfish: '🗡️', anglerfish: '🎏',
 };
+
+// Furniture / structure props — placed as entities (not voxel blocks) via the build system.
+const PROP_MODELS: Record<string, string> = {
+  lantern: 'models/environment/House/lantern.gltf',
+  chest: 'models/environment/House/chest-blocky-wood.gltf',
+  bed: 'models/environment/House/bed-red.gltf',
+  fence: 'models/environment/House/fence-wood-1.gltf',
+  door: 'models/environment/House/door-oak.gltf',
+  window: 'models/environment/House/cottage-window-1x1.gltf',
+  'lamp-post': 'models/environment/City/lamp-post.gltf',
+  bench: 'models/environment/City/park-bench.gltf',
+  barrel: 'models/environment/City/barrel-wood-1.gltf',
+  torch: 'models/environment/Dungeon/dungeon-torch-1.gltf',
+  bookshelf: 'models/environment/Dungeon/bookshelf.gltf',
+  crate: 'models/environment/Dungeon/crate-1.gltf',
+};
+
+// Measured model bottom (min Y of bounding box). A prop's base rests on a floor
+// surface S when spawned at y = S - ymin. (origin at base → ymin 0; centered → ymin < 0)
+const PROP_YMIN: Record<string, number> = {
+  lantern: -0.12, 'lamp-post': -0.25, bench: -0.35, bed: 0, chest: -0.15,
+  barrel: -0.5, crate: 0, door: -0.31, bookshelf: -0.69, torch: -0.28, fence: 0, window: 0,
+};
+// Y to spawn a prop so it rests on the block whose TOP surface is `surfaceY`.
+const propRestY = (key: string, surfaceY: number) => surfaceY - (PROP_YMIN[key] ?? 0);
 
 // Block name <-> id maps + the set of placeable block names (everything except water).
 const BLOCK_TYPES = (worldMap as any).blockTypes as { id: number; name: string }[];
@@ -136,7 +175,8 @@ const BLOCK_NAME_TO_ID: Record<string, number> = {};
 const BLOCK_ID_TO_NAME: Record<number, string> = {};
 for (const bt of BLOCK_TYPES) { BLOCK_NAME_TO_ID[bt.name] = bt.id; BLOCK_ID_TO_NAME[bt.id] = bt.name; }
 const PLACEABLE = new Set(BLOCK_TYPES.filter(b => b.id !== 16).map(b => b.name));
-const FOOD_HEAL: Record<string, number> = { carrot: 15, bread: 25, cookie: 10, 'golden-apple': 50, melon: 20 };
+const isPlaceable = (name: string) => PLACEABLE.has(name) || name in PROP_MODELS;
+const FOOD_HEAL: Record<string, number> = { carrot: 15, bread: 25, cookie: 10, 'golden-apple': 50, melon: 20, 'cod-cooked': 22, 'salmon-cooked': 32, 'cod-raw': 5, 'salmon-raw': 6 };
 
 const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
 
@@ -186,10 +226,15 @@ startServer(world => {
   console.log(`[world] terrain: ${landColumns.length} land cols, ${waterColumns.length} water cols`);
 
   /* --- Scatter biome props ----------------------------------------- */
+  const trees = new Set<Entity>(); // choppable trees → wood
+  const treeHits = new Map<Entity, number>();
+  const scenery: { entity: Entity; x: number; z: number }[] = []; // for later town-clearing
+  const townZones: { x: number; z: number; r: number }[] = [];    // village/city footprints to keep clear
   let propCount = 0;
   for (const c of landColumns) {
+    let placed = false;
     for (const p of PROPS[c.biome]) {
-      if (Math.random() < p.chance && propCount < 700) {
+      if (!placed && Math.random() < p.chance && propCount < 1000) {
         const e = new Entity({
           modelUri: p.uri,
           modelScale: 0.7 + Math.random() * 0.6,
@@ -197,12 +242,262 @@ startServer(world => {
           modelPreferredShape: p.collide ? undefined : ColliderShape.NONE,
         });
         e.spawn(world, { x: c.x + 0.5, y: c.y, z: c.z + 0.5 });
+        if (p.uri.includes('tree')) trees.add(e); // chop for logs
+        scenery.push({ entity: e, x: c.x, z: c.z });
         propCount++;
-        break;
+        placed = true;
       }
     }
   }
   console.log(`[world] props: ${propCount}`);
+
+  /* --- Villages & towns (assembled from blocks + furniture props) --- */
+  const setB = (x: number, y: number, z: number, id: number) => { try { world.chunkLattice.setBlock({ x, y, z }, id); } catch {} };
+  function placeModel(uri: string, wx: number, wy: number, wz: number, scale = 1, collide = false) {
+    try {
+      const e = new Entity({ modelUri: uri, modelScale: scale, rigidBodyOptions: { type: RigidBodyType.FIXED }, modelPreferredShape: collide ? undefined : ColliderShape.NONE });
+      e.spawn(world, { x: wx, y: wy, z: wz });
+    } catch {}
+  }
+
+  // Footprint flat enough (and dry, non-mountain) to build on?
+  function flatEnough(cx: number, cz: number, rad: number, maxDelta = 2): boolean {
+    let lo = Infinity, hi = -Infinity;
+    for (let x = cx - rad; x <= cx + rad; x += 2) for (let z = cz - rad; z <= cz + rad; z += 2) {
+      const h = heightAt(x, z);
+      if (h <= SEA_LEVEL + 1 || h >= MOUNTAIN_LEVEL) return false;
+      lo = Math.min(lo, h); hi = Math.max(hi, h);
+    }
+    return hi - lo <= maxDelta;
+  }
+
+  // A small block house with foundation, walls, doorway, windows, roof + furniture.
+  // gy is the (already-leveled) ground height the house sits on.
+  function buildHouse(cx: number, cz: number, gy: number) {
+    const gh = gy;
+    const W = 3, D = 3, H = 4;
+    const x0 = cx - W, x1 = cx + W, z0 = cz - D, z1 = cz + D;
+    const wall = BLOCK.COBBLESTONE;
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      for (let y = gh - 2; y <= gh; y++) setB(x, y, z, BLOCK.COBBLESTONE); // foundation + floor
+      for (let y = gh + 1; y <= gh + H + 2; y++) setB(x, y, z, 0);          // clear interior/roofspace
+    }
+    for (let y = gh + 1; y <= gh + H; y++) {
+      for (let x = x0; x <= x1; x++) { setB(x, y, z0, wall); setB(x, y, z1, wall); }
+      for (let z = z0; z <= z1; z++) { setB(x0, y, z, wall); setB(x1, y, z, wall); }
+    }
+    for (let y = gh + 1; y <= gh + H; y++) { // corner posts
+      setB(x0, y, z0, BLOCK.OAK_LOG); setB(x1, y, z0, BLOCK.OAK_LOG);
+      setB(x0, y, z1, BLOCK.OAK_LOG); setB(x1, y, z1, BLOCK.OAK_LOG);
+    }
+    setB(cx, gh + 1, z0, 0); setB(cx, gh + 2, z0, 0);                       // doorway
+    setB(x0, gh + 2, cz, 0); setB(x1, gh + 2, cz, 0); setB(cx, gh + 2, z1, 0); // windows
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) setB(x, gh + H + 1, z, BLOCK.OAK_LOG);     // roof base
+    for (let x = x0 + 1; x <= x1 - 1; x++) for (let z = z0 + 1; z <= z1 - 1; z++) setB(x, gh + H + 2, z, BLOCK.OAK_LEAVES); // roof peak
+    const fy = gh + 1; // interior floor surface
+    placeModel(PROP_MODELS.door, cx + 0.5, propRestY('door', fy), z0 + 0.5);
+    placeModel(PROP_MODELS.bed, x0 + 1.5, propRestY('bed', fy), z1 - 0.5);
+    placeModel(PROP_MODELS.chest, x1 - 0.5, propRestY('chest', fy), z0 + 1.5);
+    placeModel(PROP_MODELS.lantern, cx + 0.5, propRestY('lantern', fy), cz + 0.5);
+  }
+
+  // A village: ring of houses + lamp posts + a central well + andesite paths.
+  function buildVillage(cx: number, cz: number): number {
+    const gy = heightAt(cx, cz);
+    const spacing = 9;
+    const R = spacing + 4;
+    // Level the whole village plot to gy (grass) so houses sit flat — no hanging/stacking.
+    for (let x = cx - R; x <= cx + R; x++) for (let z = cz - R; z <= cz + R; z++) {
+      const h = heightAt(x, z);
+      if (h > gy) for (let y = gy + 1; y <= h; y++) setB(x, y, z, 0);
+      if (h < gy) for (let y = h + 1; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);
+      setB(x, gy, z, BLOCK.GRASS);
+    }
+    let built = 0;
+    for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
+      if (gx === 0 && gz === 0) continue;
+      const hx = cx + gx * spacing, hz = cz + gz * spacing;
+      buildHouse(hx, hz, gy);
+      placeModel(PROP_MODELS['lamp-post'], hx + 4.5, propRestY('lamp-post', gy + 1), hz + 0.5);
+      built++;
+    }
+    for (let x = cx - 1; x <= cx + 1; x++) for (let z = cz - 1; z <= cz + 1; z++) setB(x, gy, z, BLOCK.COBBLESTONE); // well
+    setB(cx, gy, cz, BLOCK.WATER);
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([dx, dz]) => { for (let y = gy + 1; y <= gy + 2; y++) setB(cx + dx, y, cz + dz, BLOCK.OAK_LOG); });
+    placeModel(PROP_MODELS.lantern, cx + 0.5, propRestY('lantern', gy + 3), cz + 0.5); // on the well posts
+    for (let d = 2; d <= spacing; d++) { // andesite paths on the flat ground
+      setB(cx + d, gy, cz, BLOCK.ANDESITE); setB(cx - d, gy, cz, BLOCK.ANDESITE);
+      setB(cx, gy, cz + d, BLOCK.ANDESITE); setB(cx, gy, cz - d, BLOCK.ANDESITE);
+    }
+    return built;
+  }
+
+  // Place a few well-separated villages on flat plains/forest land.
+  const villageCenters: { x: number; z: number }[] = [];
+  {
+    const candidates = landColumns.filter(c => c.biome === 'plains' || c.biome === 'forest');
+    for (let attempt = 0; attempt < 600 && villageCenters.length < 4; attempt++) {
+      const c = candidates[Math.floor(Math.random() * candidates.length)];
+      if (!c) break;
+      if (Math.abs(c.x) > 60 || Math.abs(c.z) > 60) continue; // stay on solid inland (off the ocean falloff)
+      if (villageCenters.some(v => Math.hypot(v.x - c.x, v.z - c.z) < 45)) continue;
+      if (!flatEnough(c.x, c.z, 12, 5)) continue;
+      if (buildVillage(c.x, c.z) >= 3) { villageCenters.push({ x: c.x, z: c.z }); townZones.push({ x: c.x, z: c.z, r: 14 }); }
+    }
+    console.log(`[world] villages: ${villageCenters.length}`);
+  }
+
+  /* --- Downtown city (multi-story buildings) ----------------------- */
+  function buildTower(cx: number, cz: number, gy: number, floors: number) {
+    const W = 4, D = 4, FH = 4;
+    const x0 = cx - W, x1 = cx + W, z0 = cz - D, z1 = cz + D;
+    const mat = pick([3 /* bricks */, BLOCK.STONE, BLOCK.COBBLESTONE, BLOCK.ANDESITE]);
+    const top = gy + floors * FH;
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      for (let y = gy - 3; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);   // foundation
+      for (let y = gy + 1; y <= top + 2; y++) setB(x, y, z, 0);             // hollow shell
+    }
+    for (let y = gy + 1; y <= top; y++) {
+      const band = (y - gy) % FH;
+      const windowRow = band === 2 || band === 3; // window band per floor
+      for (let x = x0; x <= x1; x++) {
+        const corner = x === x0 || x === x1;
+        const win = windowRow && !corner && (x - x0) % 2 === 0;
+        setB(x, y, z0, win ? 0 : mat); setB(x, y, z1, win ? 0 : mat);
+      }
+      for (let z = z0; z <= z1; z++) {
+        const corner = z === z0 || z === z1;
+        const win = windowRow && !corner && (z - z0) % 2 === 0;
+        setB(x0, y, z, win ? 0 : mat); setB(x1, y, z, win ? 0 : mat);
+      }
+    }
+    for (let y = gy + 1; y <= top; y++) { // stone corner pillars
+      setB(x0, y, z0, BLOCK.STONE); setB(x1, y, z0, BLOCK.STONE);
+      setB(x0, y, z1, BLOCK.STONE); setB(x1, y, z1, BLOCK.STONE);
+    }
+    for (let f = 1; f < floors; f++) { // interior floor slabs
+      const fy = gy + f * FH;
+      for (let x = x0 + 1; x <= x1 - 1; x++) for (let z = z0 + 1; z <= z1 - 1; z++) setB(x, fy, z, BLOCK.STONE);
+    }
+    for (let dx = -1; dx <= 1; dx++) { setB(cx + dx, gy + 1, z0, 0); setB(cx + dx, gy + 2, z0, 0); } // wide entrance
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) setB(x, top + 1, z, mat); // roof
+    for (let x = x0; x <= x1; x++) { setB(x, top + 2, z0, mat); setB(x, top + 2, z1, mat); }  // parapet
+    for (let z = z0; z <= z1; z++) { setB(x0, top + 2, z, mat); setB(x1, top + 2, z, mat); }
+    placeModel(PROP_MODELS.lantern, cx + 0.5, top + 2, cz + 0.5);
+  }
+
+  // Re-seal a tower's walls (fill the window gaps solid) so functional buildings
+  // like the Tavern/Clinic are fully enclosed — keeps only the front doorway.
+  function sealBuilding(cx: number, cz: number, gy: number, floors: number) {
+    const W = 4, D = 4, FH = 4;
+    const x0 = cx - W, x1 = cx + W, z0 = cz - D, z1 = cz + D;
+    const top = gy + floors * FH;
+    const mat = 3; // bricks
+    for (let y = gy + 1; y <= top; y++) {
+      for (let x = x0; x <= x1; x++) { setB(x, y, z0, mat); setB(x, y, z1, mat); }
+      for (let z = z0; z <= z1; z++) { setB(x0, y, z, mat); setB(x1, y, z, mat); }
+    }
+    for (let y = gy + 1; y <= top; y++) { // keep stone corner pillars for contrast
+      setB(x0, y, z0, BLOCK.STONE); setB(x1, y, z0, BLOCK.STONE);
+      setB(x0, y, z1, BLOCK.STONE); setB(x1, y, z1, BLOCK.STONE);
+    }
+    for (let dx = -1; dx <= 1; dx++) { setB(cx + dx, gy + 1, z0, 0); setB(cx + dx, gy + 2, z0, 0); } // doorway
+  }
+
+  function buildCity(cx: number, cz: number): { gy: number; towers: { x: number; z: number; floors: number }[] } {
+    const gy = heightAt(cx, cz);
+    const half = 18;
+    for (let x = cx - half; x <= cx + half; x++) for (let z = cz - half; z <= cz + half; z++) { // level the plot
+      const h = heightAt(x, z);
+      if (h > gy) for (let y = gy + 1; y <= h; y++) setB(x, y, z, 0);
+      if (h < gy) for (let y = h + 1; y <= gy; y++) setB(x, y, z, BLOCK.COBBLESTONE);
+      setB(x, gy, z, BLOCK.ANDESITE); // pavement
+    }
+    const lot = 12; const towers: { x: number; z: number; floors: number }[] = [];
+    for (let lx = cx - half + 6; lx <= cx + half - 6; lx += lot) {
+      for (let lz = cz - half + 6; lz <= cz + half - 6; lz += lot) {
+        const floors = 3 + Math.floor(Math.random() * 4); // 3–6 floors
+        buildTower(lx, lz, gy, floors);
+        placeModel(PROP_MODELS['lamp-post'], lx - 5.5, propRestY('lamp-post', gy + 1), lz - 5.5);
+        placeModel(PROP_MODELS.bench, lx + 5.5, propRestY('bench', gy + 1), lz - 5.5);
+        towers.push({ x: lx, z: lz, floors });
+      }
+    }
+    placeModel(PROP_MODELS.lantern, cx + 0.5, propRestY('lantern', gy + 1), cz + 0.5);
+    return { gy, towers };
+  }
+
+  // Decorate a functional building's interior with themed props.
+  function decorateBuilding(x: number, z: number, gy: number, type: string) {
+    const S = gy + 1; // floor surface
+    const pp = (key: string, wx: number, wz: number) => placeModel(PROP_MODELS[key], wx, propRestY(key, S), wz);
+    if (type === 'market') { pp('barrel', x - 1.5, z + 1.5); pp('crate', x + 1.5, z + 1.5); pp('crate', x + 1.5, z - 1.5); pp('chest', x - 1.5, z - 1.5); }
+    else if (type === 'clinic') { pp('bed', x - 1.5, z + 1.5); pp('bed', x + 1.5, z + 1.5); pp('lantern', x + 0.5, z + 0.5); }
+    else if (type === 'armory') { pp('crate', x - 1.5, z - 1.5); pp('crate', x + 1.5, z - 1.5); pp('torch', x + 0.5, z + 0.5); }
+    else if (type === 'library') { pp('bookshelf', x - 2, z - 2); pp('bookshelf', x - 2, z); pp('bookshelf', x - 2, z + 2); pp('lantern', x + 0.5, z + 0.5); }
+    else if (type === 'tavern') { pp('barrel', x - 1.5, z + 1.5); pp('barrel', x - 1.5, z - 0.5); pp('bench', x + 1.5, z); }
+  }
+
+  let cityCenter: { x: number; z: number; gy: number } | null = null;
+  const functionalBuildings: { x: number; z: number; type: string; label: string; emoji: string }[] = [];
+  const BUILDING_THEMES = [
+    { type: 'clinic', label: 'Clinic', emoji: '🏥' },
+    { type: 'tavern', label: 'Tavern', emoji: '🍺' },
+  ];
+  {
+    const cands = landColumns.filter(c => Math.abs(c.x) < 58 && Math.abs(c.z) < 58 && c.biome !== 'mountain');
+    for (let attempt = 0; attempt < 800 && !cityCenter; attempt++) {
+      const c = cands[Math.floor(Math.random() * cands.length)];
+      if (!c) break;
+      // City levels its own plot, so only the core needs to be roughly flat land.
+      if (!flatEnough(c.x, c.z, 9, 10)) continue;
+      if (villageCenters.some(v => Math.hypot(v.x - c.x, v.z - c.z) < 42)) continue; // keep city plot off village plots
+      const r = buildCity(c.x, c.z);
+      cityCenter = { x: c.x, z: c.z, gy: r.gy };
+      townZones.push({ x: c.x, z: c.z, r: 20 });
+      const sx = c.x + 6.5, sz = c.z + 0.5; // spawn street — make Market/Clinic the nearest buildings
+      const ordered = [...r.towers].sort((a, b) => Math.hypot(a.x - sx, a.z - sz) - Math.hypot(b.x - sx, b.z - sz));
+      ordered.forEach((t, i) => {
+        if (i >= BUILDING_THEMES.length) return;
+        const th = BUILDING_THEMES[i];
+        functionalBuildings.push({ x: t.x, z: t.z, type: th.type, label: th.label, emoji: th.emoji });
+        sealBuilding(t.x, t.z, r.gy, t.floors); // fully enclose functional buildings (no open windows)
+        decorateBuilding(t.x, t.z, r.gy, th.type);
+        // A small physical sign at the entrance (no floating sky label).
+        placeModel(PROP_MODELS.window, t.x + 0.5, r.gy + 2.5, t.z - 4.4, 1.4);
+      });
+      console.log(`[world] city: ${r.towers.length} buildings (${functionalBuildings.length} functional) at (${c.x}, ${c.z})`);
+    }
+    if (!cityCenter) console.log('[world] city: no suitable flat site found');
+  }
+
+  // Remove scenery (trees/rocks/foliage) that ended up inside a village or city plot,
+  // so nothing overlaps the buildings/streets.
+  const inTown = (x: number, z: number) => townZones.some(t => Math.abs(x - t.x) <= t.r && Math.abs(z - t.z) <= t.r);
+  let clearedScenery = 0;
+  for (const s of scenery) {
+    if (inTown(s.x, s.z)) { try { s.entity.despawn(); } catch {} trees.delete(s.entity); treeHits.delete(s.entity); clearedScenery++; }
+  }
+  console.log(`[world] cleared ${clearedScenery} scenery inside towns`);
+  // Land away from town centers — for scattering items & mobs without burying them in buildings.
+  const openLand = landColumns.filter(c => !inTown(c.x, c.z));
+
+  /* --- Fishing piers (12+ platforms over water across the map) ----- */
+  {
+    const piers: { x: number; z: number }[] = [];
+    for (let attempt = 0; attempt < 5000 && piers.length < 14; attempt++) {
+      const w = waterColumns[Math.floor(Math.random() * waterColumns.length)];
+      if (!w) break;
+      if (Math.abs(w.x) > WORLD_RADIUS - 8 || Math.abs(w.z) > WORLD_RADIUS - 8) continue;
+      if (piers.some(p => Math.hypot(p.x - w.x, p.z - w.z) < 26)) continue; // spread out
+      const py = SEA_LEVEL + 1;
+      for (let i = 0; i < 6; i++) for (let ww = 0; ww <= 1; ww++) setB(w.x + i, py, w.z + ww, BLOCK.OAK_LOG); // deck
+      setB(w.x + 5, py + 1, w.z, BLOCK.OAK_LOG);
+      placeModel(PROP_MODELS.lantern, w.x + 5.5, propRestY('lantern', py + 1), w.z + 0.5);
+      piers.push({ x: w.x, z: w.z });
+    }
+    console.log(`[world] ${piers.length} fishing piers`);
+  }
 
   /* --- Per-player state -------------------------------------------- */
   const players = new Set<any>();
@@ -215,6 +510,8 @@ startServer(world => {
   const gunEntity = new Map<any, Entity>();     // player -> held gun entity (when equipped)
   const lastBuild = new Map<any, number>();     // build/break rate limit
   const selectedSlot = new Map<any, number>();  // selected hotbar slot index
+  const placedProps = new Set<Entity>();        // player-placed furniture/structure entities
+  const fishing = new Set<any>();               // players currently casting a line
 
   function getInv(player: any): Map<string, number> {
     let inv = inventory.get(player);
@@ -224,7 +521,7 @@ startServer(world => {
 
   function sendHud(player: any) {
     const inv = getInv(player);
-    const items = [...inv.entries()].map(([name, count]) => ({ name, count, emoji: ITEM_EMOJI[name] ?? '📦', placeable: PLACEABLE.has(name) }));
+    const items = [...inv.entries()].map(([name, count]) => ({ name, count, emoji: ITEM_EMOJI[name] ?? '📦', placeable: isPlaceable(name) }));
     const sel = Math.min(selectedSlot.get(player) ?? 0, Math.max(0, items.length - 1));
     player.ui.sendData({ type: 'state', hp: hp.get(player) ?? MAX_HP, maxHp: MAX_HP, items, selected: sel, collected: [...inv.values()].reduce((a, b) => a + b, 0), total: TOTAL_ITEMS });
   }
@@ -270,8 +567,8 @@ startServer(world => {
 
   /* --- Collectible items (feed the inventory) ---------------------- */
   const activeItems = new Set<Entity>();
-  for (let i = 0; i < TOTAL_ITEMS && landColumns.length; i++) {
-    const c = pick(landColumns);
+  for (let i = 0; i < TOTAL_ITEMS && openLand.length; i++) {
+    const c = pick(openLand);
     const name = pick(COLLECTIBLES);
     let item: Entity;
     item = new Entity({
@@ -335,7 +632,7 @@ startServer(world => {
     try { mobBars.get(mob)?.setState({ pct: Math.round((left / MOB_MAX_HP) * 100) }); } catch {}
   }
 
-  for (let i = 0; i < MOB_COUNT && landColumns.length; i++) spawnMob(pick(landColumns));
+  for (let i = 0; i < MOB_COUNT && openLand.length; i++) spawnMob(pick(openLand));
   console.log(`[world] mobs: ${mobHp.size}`);
 
   function nearestPlayerEntity(pos: { x: number; y: number; z: number }, maxDist: number): PlayerEntity | null {
@@ -368,7 +665,7 @@ startServer(world => {
 
   // Respawn mobs over time to keep the world populated.
   setInterval(() => {
-    if (mobHp.size < MOB_COUNT && landColumns.length) spawnMob(pick(landColumns));
+    if (mobHp.size < MOB_COUNT && openLand.length) spawnMob(pick(openLand));
   }, 8000);
 
   function killMob(mob: Entity, byPlayer: any) {
@@ -410,15 +707,10 @@ startServer(world => {
     vehicles.push({ entity, kind, px, pz, yaw: 0, driver: null });
   }
 
-  for (let i = 0; i < 4 && landColumns.length; i++) {
-    const c = pick(landColumns);
-    spawnVehicle(`models/vehicles/${pick(['pickup-red', 'pickup-green', 'pickup-yellow', 'pickup-purple'])}.gltf`, 'land', c.x, c.z);
-  }
-  for (let i = 0; i < 4 && waterColumns.length; i++) {
-    const c = pick(waterColumns);
-    spawnVehicle(`models/vehicles/${pick(['boat', 'jetski', 'kayak'])}.gltf`, 'water', c.x, c.z);
-  }
-  console.log(`[world] vehicles: ${vehicles.length}`);
+  const pickupModel = () => `models/vehicles/${pick(['pickup-red', 'pickup-green', 'pickup-yellow', 'pickup-purple'])}.gltf`;
+  // No vehicles are placed in the world — players BUY them at the marketplace,
+  // which spawns the vehicle right next to them (see buyItem).
+  console.log('[world] vehicles: 0 (buy at marketplace)');
 
   const yawToQuat = (yaw: number) => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) });
 
@@ -477,21 +769,30 @@ startServer(world => {
     }
   }, 60);
 
-  /* --- Day / night cycle + music ----------------------------------- */
-  let timeOfDay = 0.30;
-  const CYCLE_MS = 8 * 60 * 1000;
-  const STEP_MS = 4000;
+  /* --- Day / night cycle (driven by REAL UTC time) ----------------- *
+   * 1 in-game day = 24h of real UTC. timeOfDay: 0 = 00:00 UTC (midnight),
+   * 0.25 = 06:00, 0.5 = 12:00 (noon, brightest), 0.75 = 18:00.
+   */
+  const STEP_MS = 4000; // how often lighting/HUD refresh from the clock
   let night = false;
   const dayMusic = new Audio({ uri: 'audio/music/outworld-theme-looping.mp3', loop: true, volume: 0.1 });
   const nightMusic = new Audio({ uri: 'audio/music/night-theme-looping.mp3', loop: true, volume: 0.1 });
 
+  function utcClock() {
+    const d = new Date();
+    const secs = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + d.getUTCSeconds();
+    const label = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+    return { t: secs / 86400, label };
+  }
+  let timeOfDay = utcClock().t;
+
   world.setSkyboxUri('skyboxes/partly-cloudy');
   world.setFogColor({ r: 200, g: 220, b: 240 });
   world.setFogNear(95); world.setFogFar(190);
-  dayMusic.play(world);
 
   function tickSky() {
-    timeOfDay = (timeOfDay + STEP_MS / CYCLE_MS) % 1;
+    const clock = utcClock();
+    timeOfDay = clock.t;
     const daylight = Math.max(0, Math.sin(timeOfDay * Math.PI * 2 - Math.PI / 2));
     world.setAmbientLightIntensity(0.3 + daylight * 0.8);
     world.setDirectionalLightIntensity(daylight * 1.3);
@@ -501,16 +802,27 @@ startServer(world => {
     world.setDirectionalLightPosition({ x: Math.cos(ang) * 120, y: Math.max(15, Math.sin(ang) * 120), z: 60 });
     const isNight = daylight < 0.12;
     if (isNight !== night) { night = isNight; if (night) { dayMusic.pause(); nightMusic.play(world); } else { nightMusic.pause(); dayMusic.play(world); } }
-    players.forEach(p => p.ui.sendData({ type: 'time', t: timeOfDay, phase: night ? 'night' : 'day' }));
+    players.forEach(p => p.ui.sendData({ type: 'time', t: timeOfDay, phase: night ? 'night' : 'day', label: clock.label }));
   }
+  // Start the correct music for the current UTC time, then run the cycle.
+  night = Math.max(0, Math.sin(timeOfDay * Math.PI * 2 - Math.PI / 2)) < 0.12;
+  (night ? nightMusic : dayMusic).play(world);
   setInterval(tickSky, STEP_MS);
   tickSky();
 
-  /* --- Spawn point (first dry land near origin) -------------------- */
+  /* --- Spawn point — next to a village if we built one ------------- */
   let spawn = { x: 0.5, y: heightAt(0, 0) + 3, z: 0.5 };
-  for (let r = 0; r <= WORLD_RADIUS; r += 2) {
-    const h = heightAt(r, r);
-    if (h > SEA_LEVEL + 1 && h < MOUNTAIN_LEVEL) { spawn = { x: r + 0.5, y: h + 3, z: r + 0.5 }; break; }
+  if (cityCenter) {
+    // On a street INSIDE the leveled city plaza, so there's solid pavement underfoot.
+    spawn = { x: cityCenter.x + 6.5, y: cityCenter.gy + 3, z: cityCenter.z + 0.5 };
+  } else if (villageCenters.length) {
+    const v = villageCenters[0];
+    spawn = { x: v.x + 14.5, y: heightAt(v.x + 14, v.z) + 3, z: v.z + 0.5 };
+  } else {
+    for (let r = 0; r <= WORLD_RADIUS; r += 2) {
+      const h = heightAt(r, r);
+      if (h > SEA_LEVEL + 1 && h < MOUNTAIN_LEVEL) { spawn = { x: r + 0.5, y: h + 3, z: r + 0.5 }; break; }
+    }
   }
 
   /* --- Building, guns & combat helpers ----------------------------- */
@@ -519,7 +831,9 @@ startServer(world => {
   function castFromCamera(player: any, pe: PlayerEntity, range: number) {
     const dir = player.camera?.facingDirection;
     if (!dir) return null;
-    const origin = { x: pe.position.x, y: pe.position.y + 0.6, z: pe.position.z };
+    // Start the ray slightly in FRONT of the player (eye height) so it never
+    // self-hits the player's own collider, and aligns with the crosshair.
+    const origin = { x: pe.position.x + dir.x * 0.6, y: pe.position.y + 0.7, z: pe.position.z + dir.z * 0.6 };
     return world.simulation.raycast(origin as any, dir as any, range, { filterExcludeRigidBody: (pe as any).rawRigidBody } as any);
   }
 
@@ -534,12 +848,19 @@ startServer(world => {
 
   function placeBlock(player: any, block: any, hitPoint: any) {
     const name = selectedItemName(player);
-    if (!name || !PLACEABLE.has(name)) return; // selected slot must hold a placeable block
+    if (!name || !isPlaceable(name)) return; // must hold a placeable block OR a prop
     const inv = getInv(player);
     if ((inv.get(name) ?? 0) <= 0) return;
     try {
       const coord = block.getNeighborGlobalCoordinateFromHitPoint(hitPoint);
-      world.chunkLattice.setBlock(coord, BLOCK_NAME_TO_ID[name]);
+      if (PLACEABLE.has(name)) {
+        world.chunkLattice.setBlock(coord, BLOCK_NAME_TO_ID[name]); // voxel block
+      } else {
+        // furniture / structure prop → spawn an entity on top of the targeted cell
+        const e = new Entity({ name: `prop:${name}`, modelUri: PROP_MODELS[name], modelScale: 1, rigidBodyOptions: { type: RigidBodyType.FIXED }, modelPreferredShape: ColliderShape.NONE });
+        e.spawn(world, { x: coord.x + 0.5, y: propRestY(name, coord.y), z: coord.z + 0.5 }); // rest on the surface below
+        placedProps.add(e);
+      }
       inv.set(name, inv.get(name)! - 1);
       if (inv.get(name)! <= 0) inv.delete(name);
       sendHud(player);
@@ -557,11 +878,13 @@ startServer(world => {
       return;
     }
     try {
-      const gun = new Entity({ name: 'Gun', modelUri: 'models/guns/ak47.gltf', modelScale: 0.6, parent: pe });
-      gun.spawn(world, { x: 0.3, y: 0.0, z: -0.5 });
+      // Attach as a held entity via the constructor (parent + node) — this is the
+      // pattern the SDK shooter examples use; setParent-after-spawn doesn't render.
+      const gun = new Entity({ name: 'Gun', modelUri: 'models/guns/ak47.gltf', modelScale: 0.6, parent: pe, parentNodeName: 'hand-right-anchor' });
+      gun.spawn(world, { x: 0, y: 0.1, z: 0 }, { x: 0, y: 0, z: 0, w: 1 });
       gunEntity.set(player, gun);
       player.ui.sendData({ type: 'gun', equipped: true });
-      world.chatManager.sendPlayerMessage(player, '🔫 AK-47 equipped! Left-click shoots · Q to holster.', 'FFCC00');
+      world.chatManager.sendPlayerMessage(player, '🔫 AK-47 equipped! Aim with the crosshair, left-click to shoot · Q to holster.', 'FFCC00');
     } catch (e) { console.warn('equip error', e); }
   }
 
@@ -601,6 +924,54 @@ startServer(world => {
     // Equip / holster gun (Q) — edge-triggered.
     if (input.q && !prev.q && !driving.has(player)) toggleGun(player, pe);
 
+    // Open/close the marketplace shop (R) — works anywhere.
+    if (input.r && !prev.r) { if (shopOpen.has(player)) closeShop(player); else openShop(player); }
+
+    // Fishing (X) — need a rod (any level) + bait, near water. Higher rod = more rares, faster.
+    if (input.x && !prev.x && !fishing.has(player)) {
+      const inv = getInv(player);
+      const rodLv = (inv.get('fishing-rod-3') ?? 0) > 0 ? 3 : (inv.get('fishing-rod-2') ?? 0) > 0 ? 2 : (inv.get('fishing-rod') ?? 0) > 0 ? 1 : 0;
+      if (rodLv > 0) {
+        if ((inv.get('bait') ?? 0) <= 0) world.chatManager.sendPlayerMessage(player, '🎣 Out of bait — buy some at the Marketplace.', 'FF8844');
+        else {
+          let nearWater = false; const bx = Math.round(pe.position.x), bz = Math.round(pe.position.z);
+          for (let dx = -3; dx <= 3 && !nearWater; dx++) for (let dz = -3; dz <= 3; dz++) if (heightAt(bx + dx, bz + dz) < SEA_LEVEL) { nearWater = true; break; }
+          if (!nearWater) world.chatManager.sendPlayerMessage(player, '🎣 Stand near water — head to a fishing pier.', 'FF8844');
+          else {
+            inv.set('bait', inv.get('bait')! - 1); if (inv.get('bait')! <= 0) inv.delete('bait'); sendHud(player);
+            fishing.add(player);
+            world.chatManager.sendPlayerMessage(player, '🎣 Cast! Waiting for a bite…', '88CCFF');
+            try { (pe as any).startModelOneshotAnimations?.(['simple-interact']); } catch {}
+            const rareChance = 0.1 + rodLv * 0.12;
+            const delay = Math.max(1500, 4000 - rodLv * 600 + Math.random() * 2500);
+            setTimeout(() => {
+              if (!fishing.has(player)) return;
+              fishing.delete(player);
+              const roll = Math.random();
+              const fish = roll < rareChance ? pick(['pufferfish', 'clownfish', 'catfish', 'parrotfish', 'lionfish', 'sailfish', 'swordfish', 'anglerfish'])
+                : roll < rareChance + 0.4 ? 'salmon-raw' : 'cod-raw';
+              addItem(player, fish);
+              new Audio({ uri: 'audio/sfx/liquid/splash-01.mp3', volume: 0.6 }).play(world);
+              world.chatManager.sendPlayerMessage(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`, '88FF88');
+            }, delay);
+          }
+        }
+      }
+    }
+
+    // Cook (C) — turn the selected raw fish into cooked.
+    if (input.c && !prev.c) {
+      const sel = selectedItemName(player);
+      const cookable: Record<string, string> = { 'cod-raw': 'cod-cooked', 'salmon-raw': 'salmon-cooked' };
+      if (sel && cookable[sel] && (getInv(player).get(sel) ?? 0) > 0) {
+        const inv = getInv(player);
+        inv.set(sel, inv.get(sel)! - 1); if (inv.get(sel)! <= 0) inv.delete(sel);
+        addItem(player, cookable[sel]);
+        new Audio({ uri: 'audio/sfx/player/eat.mp3', volume: 0.5 }).play(world);
+        world.chatManager.sendPlayerMessage(player, `🍳 Cooked ${sel.replace('-raw', '')}!`, 'FFCC66');
+      }
+    }
+
     // Left mouse: fire gun OR melee a mob OR mine a block.
     if (input.ml && !driving.has(player)) {
       try {
@@ -620,6 +991,22 @@ startServer(world => {
               new Audio({ uri: 'audio/sfx/player/player-swing-woosh.mp3', volume: 0.4 }).play(world);
               damageMob(target, ATTACK_DAMAGE, player, dir ? { x: dir.x, z: dir.z } : undefined);
             }
+          } else if (target && trees.has(target) && now - (lastBuild.get(player) ?? 0) > 250) {
+            lastBuild.set(player, now);
+            try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
+            const t = (treeHits.get(target) ?? 0) + 1;
+            if (t >= 3) { // falls after 3 chops
+              trees.delete(target); treeHits.delete(target);
+              try { target.despawn(); } catch {}
+              addItem(player, 'oak-log', 4);
+              world.chatManager.sendPlayerMessage(player, '🪵 Chopped a tree (+4 oak-log)', '88FF88');
+            } else { treeHits.set(target, t); }
+            new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.4 }).play(world);
+          } else if (target && placedProps.has(target) && now - (lastBuild.get(player) ?? 0) > 200) {
+            lastBuild.set(player, now);
+            placedProps.delete(target);
+            try { target.despawn(); } catch {}
+            new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.4 }).play(world);
           } else if (hit?.hitBlock && now - (lastBuild.get(player) ?? 0) > 200) {
             lastBuild.set(player, now);
             breakBlock(player, hit.hitBlock);
@@ -678,8 +1065,14 @@ startServer(world => {
     players.add(player);
     hp.set(player, MAX_HP);
     if (!inventory.has(player)) inventory.set(player, new Map());
-    addItem(player, 'cobblestone', 20); // starter building blocks (placeable)
-    addItem(player, 'oak-log', 10);
+    // Starter kit (blocks, props + gold to buy a rod + bait at the market).
+    addItem(player, 'gold-ingot', 30);
+    addItem(player, 'cobblestone', 40);
+    addItem(player, 'oak-log', 20);
+    addItem(player, 'fence', 12);
+    addItem(player, 'lantern', 6);
+    addItem(player, 'torch', 8);
+    addItem(player, 'lamp-post', 4);
 
     try {
       pe.controller?.on(BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT, ({ input }: any) => {
@@ -687,21 +1080,38 @@ startServer(world => {
       });
     } catch (e) { console.warn('input hook error', e); }
 
+    // Receive UI events (shop buttons + login form).
+    try {
+      player.ui.on(PlayerUIEvent.DATA, ({ data }: any) => {
+        handleShopUI(player, data);
+        if (data?.type === 'auth') tryAuth(player, pe, data.mode, data.username, data.password);
+        if (data?.type === 'menu-action') handleMenuAction(player, data.action);
+      });
+    } catch (e) { console.warn('ui hook error', e); }
+
     player.ui.load('ui/index.html');
     sendHud(player);
     player.ui.sendData({ type: 'time', t: timeOfDay, phase: night ? 'night' : 'day' });
+    // Prompt login once the world has had time to stream in & render, so the
+    // overlay appears over the game rather than the initial loading screen.
+    setTimeout(() => {
+      try { player.ui.sendData({ type: 'auth-required' }); player.ui.lockPointer(false); } catch {}
+    }, 1800);
 
     world.chatManager.sendPlayerMessage(player, '🌲 Welcome to Survival Explorer!', '00FF00');
     world.chatManager.sendPlayerMessage(player, 'Explore biomes, collect items, fight Wumpus, drive vehicles.');
     world.chatManager.sendPlayerMessage(player, 'WASD move · Space jump · Shift sprint');
     world.chatManager.sendPlayerMessage(player, 'L-click attack/mine · R-click place selected block · Q gun');
-    world.chatManager.sendPlayerMessage(player, '1-9 pick hotbar slot · E vehicle · F eat');
-    world.chatManager.sendPlayerMessage(player, 'Commands: /home /heal /give /time');
+    world.chatManager.sendPlayerMessage(player, '1-9 hotbar · E vehicle · F eat · R marketplace (anywhere)');
+    world.chatManager.sendPlayerMessage(player, '🎣 Buy a fishing-rod, stand near water, press X to fish · C to cook fish');
+    world.chatManager.sendPlayerMessage(player, 'Explore the villages! Commands: /build /home /heal /give /time');
   });
 
   world.on(PlayerEvent.LEFT_WORLD, ({ player }) => {
+    saveProfile(player); // persist final inventory/gold
     players.delete(player);
     driving.delete(player);
+    accountOf.delete(player); tokenOf.delete(player); authed.delete(player);
     try { gunEntity.get(player)?.despawn(); } catch {}
     gunEntity.delete(player);
     world.entityManager.getPlayerEntitiesByPlayer(player).forEach(e => e.despawn());
@@ -720,7 +1130,201 @@ startServer(world => {
   });
   world.chatManager.registerCommand('/heal', player => { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, 'Healed to full.', '66FF66'); });
   world.chatManager.registerCommand('/give', player => { COLLECTIBLES.forEach(n => addItem(player, n, 1)); world.chatManager.sendPlayerMessage(player, 'Gave one of each item.', 'FFE066'); });
+  world.chatManager.registerCommand('/build', player => {
+    ['cobblestone', 'stone', 'bricks', 'oak-log', 'sand', 'grass-block'].forEach(b => addItem(player, b, 64));
+    Object.keys(PROP_MODELS).forEach(p => addItem(player, p, 16));
+    world.chatManager.sendPlayerMessage(player, '🏗️ Full building kit added (blocks + all furniture).', 'FFE066');
+  });
   world.chatManager.registerCommand('/time', player => world.chatManager.sendPlayerMessage(player, `It is ${night ? 'night' : 'day'} (t=${timeOfDay.toFixed(2)}).`));
+
+  /* --- City building services (marketplace, clinic, …) ------------- */
+  // gold-ingot is the currency. Prices below are in gold.
+  // Buy stock split into marketplace categories (tabs).
+  const SHOP_CATEGORIES: Record<string, Record<string, number>> = {
+    items: { cobblestone: 1, 'oak-log': 2, stone: 2, bricks: 3, lantern: 3, fence: 1, 'lamp-post': 4, torch: 1, bench: 3, chest: 4, barrel: 2, bookshelf: 5 },
+    vehicles: { pickup: 50 },
+    fishing: { bait: 1, 'fishing-rod': 15, 'fishing-rod-2': 45, 'fishing-rod-3': 120 },
+    health: { 'golden-apple': 8, bread: 2, cookie: 1, melon: 2, 'cod-cooked': 5, 'salmon-cooked': 8 },
+  };
+  const SHOP_BUY: Record<string, number> = Object.assign({}, ...Object.values(SHOP_CATEGORIES));
+  // Sell: every fish + rare + staple item.
+  const SHOP_SELL: Record<string, number> = {
+    'cod-raw': 2, 'salmon-raw': 3, 'cod-cooked': 4, 'salmon-cooked': 6,
+    pufferfish: 7, clownfish: 6, catfish: 5, parrotfish: 7, lionfish: 9, sailfish: 11, swordfish: 13, anglerfish: 12,
+    bone: 1, book: 1, compass: 2, clock: 2, 'gold-nugget': 1, 'gold-ingot': 0, 'iron-ingot': 3, 'iron-nugget': 1,
+    feather: 1, 'creepy-eye': 2, 'ink-bottle': 2, paper: 1, milk: 2, firework: 3, 'name-tag': 4, melon: 1,
+  };
+  delete (SHOP_SELL as any)['gold-ingot']; // never sell the currency itself
+  const playerBuilding = new Map<any, any>();
+  const shopOpen = new Set<any>();
+  const goldOf = (player: any) => getInv(player).get('gold-ingot') ?? 0;
+  const inMarket = (player: any) => playerBuilding.get(player)?.type === 'market';
+
+  function buildingAt(pe: PlayerEntity) {
+    for (const b of functionalBuildings) {
+      if (Math.hypot(pe.position.x - (b.x + 0.5), pe.position.z - (b.z + 0.5)) < 8) return b;
+    }
+    return null;
+  }
+
+  function buyItem(player: any, item: string): string {
+    item = (item || '').toLowerCase();
+    const price = SHOP_BUY[item];
+    if (!price) return `Can't buy "${item}".`;
+    if (goldOf(player) < price) return `Need ${price} 🪙 (have ${goldOf(player)}).`;
+    const inv = getInv(player);
+    inv.set('gold-ingot', goldOf(player) - price);
+    if ((inv.get('gold-ingot') ?? 0) <= 0) inv.delete('gold-ingot');
+    new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.5 }).play(world);
+    if (item === 'pickup') { // spawn the vehicle beside the buyer instead of inventory
+      const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
+      if (pe) spawnVehicle(pickupModel(), 'land', Math.round(pe.position.x) + 2, Math.round(pe.position.z));
+      closeShop(player);
+      return `Bought a 🚗 pickup — parked next to you! Press E to drive.`;
+    }
+    addItem(player, item, 1);
+    return `Bought ${item} (−${price} 🪙)`;
+  }
+
+  function sellItem(player: any, item: string): string {
+    item = (item || '').toLowerCase();
+    const price = SHOP_SELL[item];
+    if (!price) return `Can't sell "${item}".`;
+    const inv = getInv(player);
+    if ((inv.get(item) ?? 0) <= 0) return `You have no ${item}.`;
+    inv.set(item, inv.get(item)! - 1);
+    if (inv.get(item)! <= 0) inv.delete(item);
+    addItem(player, 'gold-ingot', price);
+    new Audio({ uri: 'audio/sfx/ui/inventory-place-item.mp3', volume: 0.5 }).play(world);
+    return `Sold ${item} (+${price} 🪙)`;
+  }
+
+  const stockRow = (player: any, k: string, v: number) => ({ item: k, price: v, emoji: ITEM_EMOJI[k] ?? '📦', have: getInv(player).get(k) ?? 0 });
+  function sendShopState(player: any) {
+    const cats: Record<string, any[]> = {};
+    for (const [cat, items] of Object.entries(SHOP_CATEGORIES)) cats[cat] = Object.entries(items).map(([k, v]) => stockRow(player, k, v));
+    cats.sell = Object.entries(SHOP_SELL).map(([k, v]) => stockRow(player, k, v));
+    player.ui.sendData({ type: 'shop', open: true, gold: goldOf(player), cats });
+  }
+
+  /* --- Clinic / Tavern menu pages ---------------------------------- */
+  const menuOpen = new Map<any, string>(); // player -> 'clinic' | 'tavern'
+  function sendMenu(player: any, kind: string) {
+    const buttons = kind === 'clinic'
+      ? [{ label: '❤️ Heal to full (free)', action: 'heal' }, { label: '🩹 Buy a Golden Apple (8🪙)', action: 'buy-apple' }]
+      : [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: '🍺 Order a meal (+40 HP, 3🪙)', action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }];
+    player.ui.sendData({ type: 'menu', open: true, kind, title: kind === 'clinic' ? '🏥 Clinic' : '🍺 Tavern', gold: goldOf(player), hp: hp.get(player) ?? MAX_HP, buttons });
+  }
+  function openMenu(player: any, kind: string) { menuOpen.set(player, kind); try { player.ui.lockPointer(false); } catch {} sendMenu(player, kind); }
+  function closeMenu(player: any) { if (!menuOpen.has(player)) return; menuOpen.delete(player); try { player.ui.sendData({ type: 'menu', open: false }); player.ui.lockPointer(true); } catch {} }
+  function handleMenuAction(player: any, action: string) {
+    const kind = menuOpen.get(player);
+    if (action === 'close') { closeMenu(player); return; }
+    if (action === 'heal' || action === 'rest') { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '❤️ Fully healed.', '66FF66'); }
+    else if (action === 'buy-apple') { world.chatManager.sendPlayerMessage(player, buyItem(player, 'golden-apple'), '88FF88'); }
+    else if (action === 'meal') { if (goldOf(player) >= 3) { const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - 3); hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '🍺 Enjoyed a hearty meal! (+HP)', '66FF66'); } else world.chatManager.sendPlayerMessage(player, 'Need 3 🪙.', 'FF8844'); }
+    else if (action === 'cook-all') {
+      const inv = getInv(player); let cooked = 0;
+      for (const [raw, done] of [['cod-raw', 'cod-cooked'], ['salmon-raw', 'salmon-cooked']] as const) {
+        const n = inv.get(raw) ?? 0; if (n > 0) { inv.delete(raw); addItem(player, done, n); cooked += n; }
+      }
+      sendHud(player);
+      world.chatManager.sendPlayerMessage(player, cooked ? `🍳 Cooked ${cooked} fish.` : 'No raw fish to cook.', 'FFCC66');
+    }
+    if (kind) sendMenu(player, kind); // refresh
+  }
+  function openShop(player: any) {
+    shopOpen.add(player); // marketplace is global now — open from anywhere with R
+    try { player.ui.lockPointer(false); } catch {}
+    sendShopState(player);
+  }
+  function closeShop(player: any) {
+    if (!shopOpen.has(player)) return;
+    shopOpen.delete(player);
+    try { player.ui.sendData({ type: 'shop', open: false }); player.ui.lockPointer(true); } catch {}
+  }
+  // Handle button clicks sent from the shop UI.
+  function handleShopUI(player: any, data: any) {
+    if (!data || !data.type) return;
+    if (data.type === 'buy' || data.type === 'sell') {
+      const msg = data.type === 'buy' ? buyItem(player, data.item) : sellItem(player, data.item);
+      world.chatManager.sendPlayerMessage(player, msg, '88FF88');
+      if (shopOpen.has(player)) sendShopState(player);
+    } else if (data.type === 'shop-close') {
+      closeShop(player);
+    }
+  }
+
+  // Proximity tick: entering the Clinic/Tavern opens its menu page; leaving closes it.
+  setInterval(() => {
+    for (const player of players) {
+      const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
+      if (!pe) continue;
+      const b = buildingAt(pe);
+      const prev = playerBuilding.get(player);
+      if (b?.type !== prev?.type) {
+        playerBuilding.set(player, b ?? null);
+        if (b?.type === 'clinic') openMenu(player, 'clinic');
+        else if (b?.type === 'tavern') openMenu(player, 'tavern');
+        else if (menuOpen.has(player)) closeMenu(player);
+      }
+    }
+  }, 1000);
+
+  world.chatManager.registerCommand('/shop', player => openShop(player));
+  world.chatManager.registerCommand('/buy', (player, args) => { world.chatManager.sendPlayerMessage(player, buyItem(player, args[0]), '88FF88'); if (shopOpen.has(player)) sendShopState(player); });
+  world.chatManager.registerCommand('/sell', (player, args) => { world.chatManager.sendPlayerMessage(player, sellItem(player, args[0]), '88FF88'); if (shopOpen.has(player)) sendShopState(player); });
+
+  /* --- Accounts: log in via the in-game overlay, persist to the backend --- */
+  const CUBIT_BACKEND = process.env.CUBIT_BACKEND_URL ?? 'http://localhost:3001';
+  const accountOf = new Map<any, string>(); // player -> username
+  const tokenOf = new Map<any, string>();    // player -> JWT
+  const authed = new Set<any>();
+
+  async function tryAuth(player: any, pe: PlayerEntity, mode: string, username: string, password: string) {
+    if (mode === 'guest') {
+      try { player.ui.sendData({ type: 'auth-ok', username: 'Guest' }); player.ui.lockPointer(true); } catch {}
+      world.chatManager.sendPlayerMessage(player, 'Playing as Guest — progress will NOT be saved.', 'FFAA44');
+      return;
+    }
+    try {
+      const res = await fetch(`${CUBIT_BACKEND}/api/${mode === 'signup' ? 'signup' : 'login'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+      });
+      const data: any = await res.json();
+      if (!res.ok) { player.ui.sendData({ type: 'auth-err', msg: data.error || 'Failed.' }); return; }
+      accountOf.set(player, data.username); tokenOf.set(player, data.token); authed.add(player);
+      // Load saved profile (inventory/gold/hp).
+      try {
+        const pr = await fetch(`${CUBIT_BACKEND}/api/profile`, { headers: { Authorization: `Bearer ${data.token}` } });
+        const prof: any = await pr.json();
+        if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
+          const inv = getInv(player); inv.clear();
+          for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
+          if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp);
+          world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
+        }
+      } catch {}
+      sendHud(player);
+      try { (pe as any).nametagSceneUI?.setState({ username: data.username, profilePictureUrl: '' }); } catch {} // change the floating name
+      try { player.ui.sendData({ type: 'auth-ok', username: data.username }); player.ui.lockPointer(true); } catch {}
+      world.chatManager.sendPlayerMessage(player, `✅ Logged in as ${data.username}. Progress auto-saves.`, '00FF00');
+    } catch (e) { try { player.ui.sendData({ type: 'auth-err', msg: 'Cannot reach account server.' }); } catch {} console.warn('auth error', e); }
+  }
+
+  async function saveProfile(player: any) {
+    const token = tokenOf.get(player); if (!token) return;
+    const inventory: Record<string, number> = {};
+    for (const [k, v] of getInv(player)) inventory[k] = v;
+    try {
+      await fetch(`${CUBIT_BACKEND}/api/profile`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP } }),
+      });
+    } catch {}
+  }
+
+  setInterval(() => { for (const p of authed) saveProfile(p); }, 30000); // periodic autosave
 
   console.log('[world] Survival Explorer v2 ready.');
 });

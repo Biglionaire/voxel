@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CUBIT — Play</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; color: #fff; padding: 24px;
+      display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap;
+      /* Game-style backdrop: drop a real screenshot at /bg.jpg to use it; otherwise this sky→grass scene shows. */
+      background:
+        linear-gradient(180deg, rgba(10,16,28,0.35), rgba(10,16,28,0.7)),
+        url('/bg.jpg') center/cover no-repeat,
+        linear-gradient(180deg, #8ecbff 0%, #b6e0ff 42%, #cfeecb 52%, #6ab04c 60%, #3f7d33 100%);
+      background-blend-mode: normal;
+    }
+    /* floating voxel clouds */
+    .cloud { position: fixed; background: rgba(255,255,255,0.85); border-radius: 8px; filter: blur(1px); z-index: 0; box-shadow: 24px 0 0 rgba(255,255,255,0.85), -24px 8px 0 rgba(255,255,255,0.7); }
+    .c1 { width: 90px; height: 26px; top: 12%; left: 14%; } .c2 { width: 120px; height: 30px; top: 22%; right: 12%; }
+    .c3 { width: 70px; height: 22px; top: 40%; left: 8%; }
+    .card, .howto { position: relative; z-index: 1; }
+
+    .card { width: 100%; max-width: 360px; background: rgba(14,19,32,0.78); border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 18px; padding: 30px; box-shadow: 0 20px 60px rgba(0,0,0,0.55); backdrop-filter: blur(10px); }
+    .logo { font-size: 38px; font-weight: 900; letter-spacing: 0.12em; text-align: center;
+      background: linear-gradient(90deg, #ffd56b, #7ed957, #6bc1ff, #ff7ad1); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .tag { text-align: center; color: rgba(255,255,255,0.6); font-size: 13px; margin: 6px 0 22px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab { flex: 1; padding: 9px; border-radius: 10px; text-align: center; cursor: pointer; font-weight: 700; font-size: 14px; background: rgba(255,255,255,0.06); border: 1px solid transparent; }
+    .tab.active { background: rgba(110,200,255,0.2); border-color: rgba(110,200,255,0.5); }
+    label { display: block; font-size: 12px; color: rgba(255,255,255,0.6); margin: 12px 0 6px; font-weight: 600; }
+    input { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.3); color: #fff; font-size: 15px; outline: none; }
+    input:focus { border-color: #6bc1ff; }
+    button.go { width: 100%; margin-top: 20px; padding: 12px; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 800; color: #0e1320; background: linear-gradient(90deg, #ffd56b, #ff9f43); }
+    button.go:disabled { opacity: 0.6; cursor: default; }
+    .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
+    .msg.err { color: #ff7a7a; } .msg.ok { color: #7ed957; }
+
+    .howto { width: 100%; max-width: 380px; background: rgba(14,19,32,0.7); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px; padding: 26px 28px; backdrop-filter: blur(10px); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
+    .howto h2 { font-size: 20px; margin-bottom: 14px; }
+    .howto h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.55); margin: 16px 0 8px; }
+    .rows { display: flex; flex-direction: column; gap: 7px; }
+    .row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+    .key { display: inline-block; min-width: 30px; text-align: center; padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); font-weight: 700; font-size: 12px; }
+    .goals { font-size: 13.5px; line-height: 1.7; color: rgba(255,255,255,0.85); }
+  </style>
+</head>
+<body>
+  <div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div>
+
+  <div class="card">
+    <div class="logo">CUBIT</div>
+    <div class="tag">Open-world voxel survival</div>
+    <div class="tabs">
+      <div class="tab active" id="tab-login">Log in</div>
+      <div class="tab" id="tab-signup">Sign up</div>
+    </div>
+    <form id="form">
+      <label>Username</label>
+      <input id="username" autocomplete="username" placeholder="3–20 letters, numbers, _" />
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="min 6 characters" />
+      <button class="go" id="submit" type="submit">Enter CUBIT</button>
+      <div class="msg" id="msg"></div>
+    </form>
+  </div>
+
+  <div class="howto">
+    <h2>🎮 How to Play</h2>
+    <div class="goals">
+      Explore a procedural island of biomes, towns &amp; a downtown city. Gather resources, fight Wumpus,
+      build, drive, and trade gold at the 🏪 Marketplace.
+    </div>
+    <h3>Controls</h3>
+    <div class="rows">
+      <div class="row"><span class="key">WASD</span> Move · <span class="key">Space</span> Jump · <span class="key">Shift</span> Sprint</div>
+      <div class="row"><span class="key">L-Click</span> Attack / mine / chop trees</div>
+      <div class="row"><span class="key">R-Click</span> Place the selected block / prop</div>
+      <div class="row"><span class="key">1–9</span> Pick a hotbar slot</div>
+      <div class="row"><span class="key">Q</span> Equip gun · <span class="key">F</span> Eat food</div>
+      <div class="row"><span class="key">E</span> Enter / exit a vehicle</div>
+      <div class="row"><span class="key">R</span> Open the shop (inside the 🏪 Marketplace)</div>
+    </div>
+    <h3>Tips</h3>
+    <div class="goals">
+      🪵 Chop trees for wood · 🏥 stand in the Clinic to heal · 🪙 sell loot for gold, then buy gear ·
+      🛏️ your inventory &amp; gold save to your account.
+    </div>
+  </div>
+
+  <script>
+    let mode = 'login';
+    const $ = id => document.getElementById(id);
+    const setMode = m => { mode = m; $('tab-login').classList.toggle('active', m === 'login'); $('tab-signup').classList.toggle('active', m === 'signup'); $('submit').textContent = m === 'login' ? 'Enter CUBIT' : 'Create account'; $('msg').textContent = ''; };
+    $('tab-login').onclick = () => setMode('login');
+    $('tab-signup').onclick = () => setMode('signup');
+
+    const saved = localStorage.getItem('cubit_token');
+    if (saved) { $('msg').className = 'msg ok'; $('msg').textContent = 'Welcome back — entering…'; setTimeout(() => location.href = '/play?token=' + encodeURIComponent(saved), 700); }
+
+    $('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const username = $('username').value.trim(), password = $('password').value;
+      $('submit').disabled = true; $('msg').className = 'msg'; $('msg').textContent = '…';
+      try {
+        const res = await fetch('/api/' + (mode === 'login' ? 'login' : 'signup'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        const data = await res.json();
+        if (!res.ok) { $('msg').className = 'msg err'; $('msg').textContent = data.error || 'Failed.'; $('submit').disabled = false; return; }
+        localStorage.setItem('cubit_token', data.token); localStorage.setItem('cubit_user', data.username);
+        $('msg').className = 'msg ok'; $('msg').textContent = 'Success! Entering CUBIT…';
+        setTimeout(() => location.href = '/play?token=' + encodeURIComponent(data.token), 500);
+      } catch (err) { $('msg').className = 'msg err'; $('msg').textContent = 'Network error.'; $('submit').disabled = false; }
+    };
+  </script>
+</body>
+</html>
