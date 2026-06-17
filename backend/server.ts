@@ -189,6 +189,17 @@ Bun.serve({
       }
     }
 
+    // Internal: the game server sends $CUBIT after it has already debited in-game gold.
+    if (pathname === '/api/cubit/send' && req.method === 'POST') {
+      const key = req.headers.get('x-internal-key');
+      if (!process.env.CUBIT_INTERNAL_KEY || key !== process.env.CUBIT_INTERNAL_KEY) return json({ error: 'Forbidden.' }, 403);
+      if (!solanaEnabled) return json({ error: '$CUBIT not configured.' }, 503);
+      const { wallet, amount } = await req.json().catch(() => ({}));
+      if (!isWalletName(wallet) || !(Number(amount) > 0)) return json({ error: 'Bad args.' }, 400);
+      try { return json({ ok: true, sig: await sendCubit(wallet, Number(amount)) }); }
+      catch (e: any) { return json({ error: String(e?.message || e) }, 500); }
+    }
+
     // --- Who am I (token check) ---
     if (pathname === '/api/me') {
       const username = verifyToken(bearer(req));

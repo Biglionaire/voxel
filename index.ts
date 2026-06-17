@@ -1536,6 +1536,30 @@ startServer(world => {
       world.chatManager.sendPlayerMessage(player, `${done ? '✅' : '▫️'} ${a.label} (${cur}/${a.n})${done ? '' : ` → +${a.gold}🪙`}`, done ? '88FF88' : 'CCCCCC');
     }
   });
+  // Cash out in-game gold → $CUBIT on-chain (wallet accounts only). The game debits
+  // its own gold, then the backend treasury sends the tokens — no caveat, works live.
+  world.chatManager.registerCommand('/cashout', async (player, args) => {
+    const wallet = accountOf.get(player);
+    if (!wallet || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) { world.chatManager.sendPlayerMessage(player, '💠 Connect a Solana wallet (on cubit.cash) to cash out gold → $CUBIT.', 'FF8844'); return; }
+    const amt = Math.floor(Number(args[0] ?? '0'));
+    if (!(amt > 0)) { world.chatManager.sendPlayerMessage(player, 'Usage: /cashout <gold amount>  (1 gold → 1 $CUBIT)', 'CCCCCC'); return; }
+    if (goldOf(player) < amt) { world.chatManager.sendPlayerMessage(player, `Not enough gold (have ${goldOf(player)}).`, 'FF8844'); return; }
+    const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - amt); if ((inv.get('gold-ingot') ?? 0) <= 0) inv.delete('gold-ingot'); sendHud(player);
+    await saveProfile(player);
+    toast(player, `💠 Sending ${amt} $CUBIT to your wallet…`);
+    try {
+      const res = await fetch(`${process.env.CUBIT_BACKEND_URL ?? 'http://localhost:3001'}/api/cubit/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.CUBIT_INTERNAL_KEY ?? '' }, body: JSON.stringify({ wallet, amount: amt }),
+      });
+      const data: any = await res.json();
+      if (!data.ok) throw new Error(data.error || 'failed');
+      toast(player, `✅ Cashed out ${amt} $CUBIT!`);
+      world.chatManager.sendPlayerMessage(player, `✅ Cashed out ${amt} gold → ${amt} $CUBIT (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
+    } catch (e) {
+      addItem(player, 'gold-ingot', amt); // refund on failure
+      world.chatManager.sendPlayerMessage(player, `❌ Cash out failed — gold refunded. (${e})`, 'FF5555');
+    }
+  });
   world.chatManager.registerCommand('/hair', (player, args) => {
     const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
     if (!pe) return;
