@@ -38,6 +38,13 @@
     .xbtn:hover { background: #181818; }
     .walletbtn { display: block; width: 100%; margin-top: 10px; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 800; font-size: 15px; color: #fff; background: linear-gradient(90deg, #9945FF, #14F195); border: none; }
     .walletbtn:hover { filter: brightness(1.08); } .walletbtn:disabled { opacity: 0.6; cursor: default; }
+    #wdash { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.15); }
+    .wrow { display: flex; justify-content: space-between; align-items: center; font-size: 14px; padding: 6px 0; color: rgba(255,255,255,0.85); }
+    .wrow b { font-size: 18px; color: #14F195; }
+    .wwithdraw { display: flex; gap: 8px; margin-top: 10px; }
+    .wwithdraw input { flex: 1; }
+    .wwithdraw button { padding: 0 16px; border: none; border-radius: 10px; cursor: pointer; font-weight: 800; color: #0e1320; background: linear-gradient(90deg,#9945FF,#14F195); }
+    .wwithdraw button:disabled { opacity: 0.6; }
     .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
     .msg.err { color: #ff7a7a; } .msg.ok { color: #7ed957; }
 
@@ -62,6 +69,16 @@
     <button class="walletbtn" id="wallet" type="button">🔗 Connect Wallet (Solana)</button>
     <a class="xbtn" id="xbtn" href="https://x.com" target="_blank" rel="noopener">𝕏 &nbsp;Follow on X</a>
     <div class="msg" id="wmsg">Play as guest in-game, or connect your Solana wallet to register.</div>
+    <div id="wdash" style="display:none">
+      <div class="wrow"><span>🪙 In-game gold</span><b id="w-gold">0</b></div>
+      <div class="wrow"><span>💠 $CUBIT (devnet)</span><b id="w-cubit">0</b></div>
+      <div class="wwithdraw">
+        <input id="w-amt" type="number" min="1" placeholder="Amount of gold → $CUBIT" />
+        <button id="w-withdraw" type="button">Withdraw</button>
+      </div>
+      <div class="msg" id="w-msg"></div>
+      <button class="go bigplay" id="w-play" type="button" style="margin-top:6px">▶ Enter Game</button>
+    </div>
   </div>
 
   <div class="howto">
@@ -104,11 +121,33 @@
         const signature = btoa(String.fromCharCode(...signed.signature));
         const r2 = await fetch('/api/wallet-verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet, signature }) });
         const j2 = await r2.json(); if (!j2.token) throw new Error(j2.error || 'verify failed');
-        wbtn.textContent = (j2.isNew ? '✅ Registered' : '✅ Welcome back') + ' — entering…';
+        wbtn.textContent = (j2.isNew ? '✅ Registered' : '✅ Connected');
         localStorage.setItem('cubit_token', j2.token);
-        location.href = '/play?token=' + encodeURIComponent(j2.token);
+        window.cubitToken = j2.token;
+        await loadWallet();
+        document.getElementById('wdash').style.display = 'block';
       } catch (e) { wbtn.disabled = false; wbtn.textContent = '🔗 Connect Wallet (Solana)'; wmsg.textContent = 'Wallet: ' + (e.message || e); }
     });
+
+    async function loadWallet() {
+      const b = await (await fetch('/api/cubit/balance', { headers: { Authorization: 'Bearer ' + window.cubitToken } })).json();
+      document.getElementById('w-gold').textContent = b.gold ?? 0;
+      document.getElementById('w-cubit').textContent = b.cubit ?? 0;
+    }
+    document.getElementById('w-withdraw').addEventListener('click', async () => {
+      const btn = document.getElementById('w-withdraw'), amt = parseInt(document.getElementById('w-amt').value, 10);
+      const m = document.getElementById('w-msg');
+      if (!(amt > 0)) { m.textContent = 'Enter an amount.'; return; }
+      btn.disabled = true; m.textContent = 'Sending on-chain…';
+      try {
+        const r = await (await fetch('/api/cubit/withdraw', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ amount: amt }) })).json();
+        if (!r.ok) throw new Error(r.error || 'failed');
+        m.innerHTML = '✅ Withdrew ' + r.withdrawn + ' $CUBIT! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">View tx</a>';
+        await loadWallet();
+      } catch (e) { m.textContent = '❌ ' + (e.message || e); }
+      btn.disabled = false;
+    });
+    document.getElementById('w-play').addEventListener('click', () => location.href = '/play?token=' + encodeURIComponent(window.cubitToken));
   </script>
 </body>
 </html>

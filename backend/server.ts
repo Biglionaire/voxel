@@ -11,6 +11,11 @@
 
 import { Database } from 'bun:sqlite';
 import { createHmac, timingSafeEqual, verify as edVerify, createPublicKey, randomBytes } from 'crypto';
+import { solanaEnabled, treasuryAddress, mintAddress, getCubitBalance, sendCubit } from './solana';
+
+const isWalletName = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s); // base58 Solana pubkey
+const getProfileData = (username: string): any => { const row = db.query('SELECT data FROM profiles WHERE username = ?').get(username) as any; return row ? JSON.parse(row.data) : {}; };
+const setProfileData = (username: string, data: any) => { const s = JSON.stringify(data); db.run('INSERT INTO profiles (username, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET data = ?, updated_at = ?', [username, s, Date.now(), s, Date.now()]); };
 
 /* ---------------- Solana wallet auth (ed25519, no deps) ---------------- */
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -146,6 +151,42 @@ Bun.serve({
       const exists = db.query('SELECT 1 FROM users WHERE username = ?').get(wallet);
       if (!exists) db.run('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)', [wallet, 'wallet:' + wallet, Date.now()]);
       return json({ token: signToken(wallet), username: wallet, wallet, isNew: !exists });
+    }
+
+    // --- $CUBIT on-chain (Solana, custodial treasury) ---
+    if (pathname === '/api/cubit/info') {
+      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', rate: 1 });
+    }
+    if (pathname === '/api/cubit/balance') {
+      const username = verifyToken(bearer(req));
+      if (!username) return json({ error: 'Unauthorized.' }, 401);
+      const pd = getProfileData(username);
+      const gold = pd?.inventory?.['gold-ingot'] ?? 0;
+      const cubit = isWalletName(username) ? await getCubitBalance(username) : 0;
+      return json({ wallet: isWalletName(username) ? username : null, gold, cubit });
+    }
+    // Withdraw: burn in-game gold → send $CUBIT from the treasury to the player's wallet (1:1).
+    if (pathname === '/api/cubit/withdraw' && req.method === 'POST') {
+      const username = verifyToken(bearer(req));
+      if (!username) return json({ error: 'Unauthorized.' }, 401);
+      if (!isWalletName(username)) return json({ error: 'Connect with a Solana wallet to withdraw.' }, 400);
+      if (!solanaEnabled) return json({ error: '$CUBIT is not configured yet.' }, 503);
+      const { amount } = await req.json().catch(() => ({}));
+      const amt = Math.floor(Number(amount));
+      if (!(amt > 0)) return json({ error: 'Enter a valid amount.' }, 400);
+      const pd = getProfileData(username);
+      if (!pd.inventory) pd.inventory = {};
+      const gold = pd.inventory['gold-ingot'] ?? 0;
+      if (gold < amt) return json({ error: `Not enough gold (you have ${gold}).` }, 400);
+      pd.inventory['gold-ingot'] = gold - amt; if (pd.inventory['gold-ingot'] <= 0) delete pd.inventory['gold-ingot'];
+      setProfileData(username, pd); // debit first
+      try {
+        const sig = await sendCubit(username, amt);
+        return json({ ok: true, sig, withdrawn: amt });
+      } catch (e: any) {
+        pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + amt; setProfileData(username, pd); // refund
+        return json({ error: 'Transfer failed: ' + (e?.message || e) }, 500);
+      }
     }
 
     // --- Who am I (token check) ---
