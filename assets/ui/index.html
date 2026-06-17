@@ -106,7 +106,7 @@
 
       <div id="w-msg" class="wallet-msg"></div>
     </div>
-    <div class="wallet-foot">Devnet test-USDC · Press ✕ to close</div>
+    <div class="wallet-foot"><span id="w-foot">USDC</span> · Press ✕ to close</div>
   </div>
 </div>
 
@@ -241,9 +241,10 @@
       walletInfo = data;
       const sym = data.symbol || 'USDC';
       document.getElementById('w-gold').textContent = (data.gold ?? 0).toLocaleString();
-      document.getElementById('w-usdc').textContent = (data.usdc == null ? '—' : data.usdc + ' ' + sym);
+      document.getElementById('w-usdc').textContent = (data.usdc == null ? '—' : Number(data.usdc).toFixed(4).replace(/\.?0+$/, '') + ' ' + sym);
       document.getElementById('w-sym').textContent = sym;
       [...document.querySelectorAll('.w-sym2')].forEach(e => e.textContent = sym);
+      document.getElementById('w-foot').textContent = data.network === 'mainnet-beta' ? (sym + ' · Solana mainnet') : ('Devnet test-' + sym);
       const hasW = !!data.wallet;
       document.getElementById('wallet-noauth').style.display = hasW ? 'none' : 'block';
       document.getElementById('wallet-body').style.display = hasW ? 'block' : 'none';
@@ -333,8 +334,21 @@
     const amt = parseFloat(document.getElementById('w-in-amt').value);
     if (!(amt > 0)) { setWMsg('Enter a USDC amount.', true); return; }
     if (!walletInfo || !walletInfo.mint || !walletInfo.treasury) { setWMsg('Deposit unavailable right now.', true); return; }
-    if (!window.cubitDeposit) { setWMsg('Wallet module still loading — try again in a moment.', true); return; }
     const btn = document.getElementById('w-in-btn'); btn.disabled = true;
+    // esm.sh module loads lazily on first use — wait up to ~5s before giving up
+    if (!window.cubitDeposit) {
+      setWMsg('Loading wallet module…', false);
+      for (let i = 0; i < 20 && !window.cubitDeposit; i++) await new Promise(r => setTimeout(r, 250));
+    }
+    if (!window.cubitDeposit) {
+      setWMsg('In-game deposit unavailable here — deposit at cubit.cash (Wallet dashboard). Cash-out still works in-game.', true);
+      try { window.open('https://cubit.cash', '_blank'); } catch (e) {}
+      btn.disabled = false; return;
+    }
+    if (!window.solana) {
+      setWMsg('Phantom not detected in-game — deposit at cubit.cash instead.', true);
+      btn.disabled = false; return;
+    }
     setWMsg('Approve the transaction in Phantom…', false);
     try {
       const sig = await window.cubitDeposit(amt, walletInfo);
@@ -371,8 +385,22 @@
 <!-- In-game Phantom deposit: build an SPL transfer of the reward token to the treasury, sign+send.
      Returns the signature; the game server verifies it and credits gold. -->
 <script type="module">
-  import { Connection, PublicKey, Transaction, clusterApiUrl } from 'https://esm.sh/@solana/web3.js@1.95.3';
-  import { getAssociatedTokenAddress, createTransferInstruction } from 'https://esm.sh/@solana/spl-token@0.4.9';
+  // Load lazily with a fallback CDN so a slow/blocked esm.sh doesn't silently leave
+  // window.cubitDeposit undefined. The deposit button waits for this to resolve.
+  async function loadSolana() {
+    const cdns = ['https://esm.sh', 'https://cdn.jsdelivr.net/npm'];
+    for (const base of cdns) {
+      try {
+        const web3 = await import(`${base}/@solana/web3.js@1.95.3${base.includes('jsdelivr') ? '/+esm' : ''}`);
+        const spl = await import(`${base}/@solana/spl-token@0.4.9${base.includes('jsdelivr') ? '/+esm' : ''}`);
+        return { web3, spl };
+      } catch (e) { /* try next CDN */ }
+    }
+    throw new Error('could not load Solana libs');
+  }
+  const { web3, spl } = await loadSolana();
+  const { Connection, PublicKey, Transaction, clusterApiUrl } = web3;
+  const { getAssociatedTokenAddress, createTransferInstruction } = spl;
   window.cubitDeposit = async (amount, info) => {
     const p = window.solana;
     if (!p) throw new Error('Phantom not found in-game — deposit from cubit.cash instead.');
