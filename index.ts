@@ -1354,17 +1354,21 @@ startServer(world => {
             const tier = bestToolTier(player, kind === 'tree' ? 'axe' : 'pickaxe');
             const dur = Math.round(base * (TIER_SPEED[tier] ?? 1.7));
             const sess = mining.get(player);
+            const mlabel = kind === 'tree' ? '🪓 Chopping' : '⛏️ Mining';
             if (!sess || sess.target !== target) {
               mining.set(player, { target, endAt: now + dur, dur });
-              toast(player, `${kind === 'tree' ? '🪓' : '⛏️'} Mining… ${(dur / 1000).toFixed(1)}s`);
               try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
+              try { player.ui.sendData({ type: 'mine', pct: 0, label: mlabel }); } catch {}
             } else if (now >= sess.endAt) {
               mining.delete(player); harvestNode(player, target, kind);
-            } else if (now - (lastBuild.get(player) ?? 0) > 600) {
-              lastBuild.set(player, now);
-              toast(player, `${kind === 'tree' ? '🪓' : '⛏️'} ${Math.round((1 - (sess.endAt - now) / sess.dur) * 100)}%`);
-              try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
-              try { new Audio({ uri: 'audio/sfx/player/player-swing-woosh.mp3', volume: 0.3 }).play(world); } catch {}
+              try { player.ui.sendData({ type: 'mine', done: true }); } catch {}
+            } else {
+              try { player.ui.sendData({ type: 'mine', pct: Math.round((1 - (sess.endAt - now) / sess.dur) * 100), label: mlabel }); } catch {}
+              if (now - (lastBuild.get(player) ?? 0) > 500) {
+                lastBuild.set(player, now);
+                try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
+                try { new Audio({ uri: 'audio/sfx/player/player-swing-woosh.mp3', volume: 0.3 }).play(world); } catch {}
+              }
             }
           } else if (target && placedProps.has(target) && now - (lastBuild.get(player) ?? 0) > 200) {
             lastBuild.set(player, now);

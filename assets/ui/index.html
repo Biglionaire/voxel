@@ -22,6 +22,7 @@
   <div id="inventory"></div>
   <div id="crosshair"></div>
   <div id="hurt"></div>
+  <div id="mine-bar"><span id="mine-label">Mining</span><div id="mine-track"><div id="mine-fill"></div></div></div>
   <div id="toast"></div>
   <div id="building-prompt"></div>
 </div>
@@ -151,6 +152,15 @@
 
     if (data.type === 'toast' && data.text) showToast(data.text);
     if (data.type === 'zone') document.getElementById('flatBtn').textContent = data.flat ? '🏠 Exit Build' : '🏗️ Flatland';
+
+    if (data.type === 'mine') {
+      const bar = document.getElementById('mine-bar');
+      if (data.done) { bar.style.display = 'none'; return; }
+      document.getElementById('mine-label').textContent = data.label || 'Mining';
+      document.getElementById('mine-fill').style.width = (data.pct || 0) + '%';
+      bar.style.display = 'block';
+      clearTimeout(window._mineHide); window._mineHide = setTimeout(() => { bar.style.display = 'none'; }, 500);
+    }
 
     if (data.type === 'bag') {
       const bag = document.getElementById('bag');
@@ -302,6 +312,10 @@
   #lvl-badge { font-size: 11px; font-weight: 800; color: #ffe08a; min-width: 30px; }
   #xp-track { flex: 1; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.16); overflow: hidden; }
   #xp-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd56b,#ff9f43); transition: width 0.25s ease; }
+  #mine-bar { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); width: 240px; display: none; text-align: center; pointer-events: none; z-index: 40; }
+  #mine-label { font-size: 12px; font-weight: 700; color: #fff; text-shadow: 1px 1px 3px #000; }
+  #mine-track { height: 9px; border-radius: 5px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; margin-top: 3px; }
+  #mine-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd56b,#7ed957); transition: width 0.1s linear; }
 
   #gun-indicator { display: none; bottom: 20px; right: 16px; color: #ffcc33; }
 
