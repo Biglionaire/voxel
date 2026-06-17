@@ -12,6 +12,7 @@
   <div id="objective" class="panel"><span class="k">WASD</span>move<span class="k">Space</span>jump<span class="k">Shift</span>run<span class="k">LMB</span>mine<span class="k">RMB</span>place<span class="k">1-9</span>hotbar<span class="k">E</span>vehicle<span class="k">Q</span>gun<span class="k">F</span>eat<span class="k">X</span>fish<span class="k">V</span>craft<span class="k">B</span>bag</div>
   <div id="flatBtn" title="Go to the Flatland build world (or /build)">🏗️ Flatland</div>
   <div id="walletBtn" title="Open your wallet — cash out gold to USDC">💰 Wallet</div>
+  <div id="bagBtn" title="Open your bag (inventory)">🎒 Bag</div>
 
   <div id="health" class="panel">
     <span id="hp-label">❤️ 100</span>
@@ -77,6 +78,35 @@
     <div class="menu-head"><span id="menu-title"></span><span id="menu-gold"></span><button id="menu-close" type="button">✕</button></div>
     <div id="menu-hp"></div>
     <div id="menu-buttons"></div>
+  </div>
+</div>
+
+<!-- Wallet: on-chain cash-out (withdraw) + deposit, with amount inputs -->
+<div id="wallet">
+  <div class="wallet-panel">
+    <div class="wallet-head"><span>💰 Wallet</span><button id="wallet-close" type="button">✕</button></div>
+    <div id="wallet-noauth" class="wallet-note" style="display:none">🔗 Connect a Solana wallet on <b>cubit.cash</b> to cash out &amp; deposit. Then rejoin from there.</div>
+    <div id="wallet-body">
+      <div class="wallet-bal">
+        <div class="wbal"><span class="wbal-k">🪙 Gold</span><span id="w-gold" class="wbal-v">0</span></div>
+        <div class="wbal"><span class="wbal-k">💵 <span id="w-sym">USDC</span></span><span id="w-usdc" class="wbal-v">—</span></div>
+      </div>
+      <div id="w-rateline" class="wallet-rate"></div>
+      <div id="w-dailyline" class="wallet-daily"></div>
+
+      <div class="wallet-sec">
+        <div class="wsec-title">💵 Cash out — gold → <span class="w-sym2">USDC</span></div>
+        <div class="wrow"><input id="w-out-amt" type="number" min="0" step="1" placeholder="gold amount" /><button id="w-out-btn" type="button">Cash out</button></div>
+      </div>
+      <div class="wallet-sec">
+        <div class="wsec-title">⬇️ Deposit — <span class="w-sym2">USDC</span> → gold</div>
+        <div class="wrow"><input id="w-in-amt" type="number" min="0" step="0.000001" placeholder="USDC amount" /><button id="w-in-btn" type="button">Deposit</button></div>
+        <div class="whint">Paid from your Phantom wallet — approve the transaction when prompted.</div>
+      </div>
+
+      <div id="w-msg" class="wallet-msg"></div>
+    </div>
+    <div class="wallet-foot">Devnet test-USDC · Press ✕ to close</div>
   </div>
 </div>
 
@@ -205,6 +235,25 @@
       menu.style.display = 'flex';
     }
 
+    if (data.type === 'wallet') {
+      const w = document.getElementById('wallet');
+      if (!data.open) { w.style.display = 'none'; return; }
+      walletInfo = data;
+      const sym = data.symbol || 'USDC';
+      document.getElementById('w-gold').textContent = (data.gold ?? 0).toLocaleString();
+      document.getElementById('w-usdc').textContent = (data.usdc == null ? '—' : data.usdc + ' ' + sym);
+      document.getElementById('w-sym').textContent = sym;
+      [...document.querySelectorAll('.w-sym2')].forEach(e => e.textContent = sym);
+      const hasW = !!data.wallet;
+      document.getElementById('wallet-noauth').style.display = hasW ? 'none' : 'block';
+      document.getElementById('wallet-body').style.display = hasW ? 'block' : 'none';
+      const rate = data.rate || 100000;
+      document.getElementById('w-rateline').textContent = 'Rate: ' + rate.toLocaleString() + ' gold = 1 ' + sym + '  ·  min ' + (data.minGold || 0).toLocaleString() + ' gold';
+      document.getElementById('w-dailyline').textContent = data.dailyLeft == null ? '' : ('🕒 Daily limit remaining: ' + data.dailyLeft + ' ' + sym);
+      setWMsg('', false);
+      w.style.display = 'flex';
+    }
+
     if (data.type === 'auth-required') {
       // Auto-login if the landing (wallet/login) passed a session token in the URL.
       let st = null; try { st = new URLSearchParams(location.search).get('sessionToken'); } catch (e) {}
@@ -265,7 +314,35 @@
   document.getElementById('auth-guest').addEventListener('click', () => hytopia.sendData({ type: 'auth', mode: 'guest' }));
   document.getElementById('flatBtn').addEventListener('click', () => hytopia.sendData({ type: 'toggle-flat' }));
   document.getElementById('walletBtn').addEventListener('click', () => hytopia.sendData({ type: 'open-wallet' }));
+  document.getElementById('bagBtn').addEventListener('click', () => hytopia.sendData({ type: 'open-bag' }));
   document.getElementById('bag-close').addEventListener('click', () => hytopia.sendData({ type: 'bag-close' }));
+
+  // Wallet panel (input-driven cash-out + deposit)
+  let walletInfo = null;
+  function setWMsg(t, err) { const m = document.getElementById('w-msg'); m.textContent = t || ''; m.className = 'wallet-msg' + (err ? ' err' : ''); }
+  document.getElementById('wallet-close').addEventListener('click', () => hytopia.sendData({ type: 'wallet-close' }));
+  document.getElementById('w-out-btn').addEventListener('click', () => {
+    const amt = parseInt(document.getElementById('w-out-amt').value, 10);
+    if (!(amt > 0)) { setWMsg('Enter a gold amount.', true); return; }
+    if (walletInfo && amt > (walletInfo.gold || 0)) { setWMsg('Not enough gold (have ' + (walletInfo.gold || 0).toLocaleString() + ').', true); return; }
+    if (walletInfo && walletInfo.minGold && amt < walletInfo.minGold) { setWMsg('Minimum cash-out is ' + walletInfo.minGold.toLocaleString() + ' gold.', true); return; }
+    setWMsg('Cashing out…', false);
+    hytopia.sendData({ type: 'withdraw', amount: amt });
+  });
+  document.getElementById('w-in-btn').addEventListener('click', async () => {
+    const amt = parseFloat(document.getElementById('w-in-amt').value);
+    if (!(amt > 0)) { setWMsg('Enter a USDC amount.', true); return; }
+    if (!walletInfo || !walletInfo.mint || !walletInfo.treasury) { setWMsg('Deposit unavailable right now.', true); return; }
+    if (!window.cubitDeposit) { setWMsg('Wallet module still loading — try again in a moment.', true); return; }
+    const btn = document.getElementById('w-in-btn'); btn.disabled = true;
+    setWMsg('Approve the transaction in Phantom…', false);
+    try {
+      const sig = await window.cubitDeposit(amt, walletInfo);
+      setWMsg('Confirming on-chain…', false);
+      hytopia.sendData({ type: 'deposit', sig });
+    } catch (e) { setWMsg('Deposit failed: ' + (e && e.message ? e.message : e), true); }
+    btn.disabled = false;
+  });
 
   // Floating mob health bars in 3D space.
   if (hytopia.registerSceneUITemplate) {
@@ -291,6 +368,29 @@
   }
 </script>
 
+<!-- In-game Phantom deposit: build an SPL transfer of the reward token to the treasury, sign+send.
+     Returns the signature; the game server verifies it and credits gold. -->
+<script type="module">
+  import { Connection, PublicKey, Transaction, clusterApiUrl } from 'https://esm.sh/@solana/web3.js@1.95.3';
+  import { getAssociatedTokenAddress, createTransferInstruction } from 'https://esm.sh/@solana/spl-token@0.4.9';
+  window.cubitDeposit = async (amount, info) => {
+    const p = window.solana;
+    if (!p) throw new Error('Phantom not found in-game — deposit from cubit.cash instead.');
+    if (!p.isConnected || !p.publicKey) await p.connect();
+    const conn = new Connection(clusterApiUrl('devnet'), 'confirmed');
+    const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
+    const user = new PublicKey(p.publicKey.toString());
+    const fromAta = await getAssociatedTokenAddress(mint, user);
+    const toAta = await getAssociatedTokenAddress(mint, treasury);
+    const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** (info.decimals || 6)))));
+    tx.feePayer = user;
+    tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+    const { signature } = await p.signAndSendTransaction(tx);
+    await conn.confirmTransaction(signature, 'confirmed');
+    return signature;
+  };
+</script>
+
 <style>
   #hud { position: fixed; inset: 0; pointer-events: none; font-family: 'Inter', system-ui, sans-serif; color: #fff; user-select: none; }
   .panel { position: fixed; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 8px 14px; font-size: 15px; font-weight: 600; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
@@ -310,6 +410,10 @@
     background: rgba(18,42,32,0.75); border: 1px solid rgba(20,241,149,0.5); border-radius: 9px; padding: 7px 12px;
     font-size: 13px; font-weight: 800; color: #c9ffe8; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   #walletBtn:hover { background: rgba(24,70,52,0.92); border-color: #14F195; }
+  #bagBtn { position: fixed; top: 116px; right: 14px; z-index: 50; pointer-events: auto; cursor: pointer; user-select: none;
+    background: rgba(44,34,18,0.75); border: 1px solid rgba(214,170,90,0.5); border-radius: 9px; padding: 7px 12px;
+    font-size: 13px; font-weight: 800; color: #ffe6bf; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+  #bagBtn:hover { background: rgba(70,52,24,0.92); border-color: #d6aa5a; }
 
   #health { bottom: 20px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
   #hp-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; }
@@ -394,6 +498,33 @@
   #menu-buttons { display: flex; flex-direction: column; gap: 8px; padding: 14px 18px 18px; }
   .menu-btn { padding: 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(255,255,255,0.06); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; text-align: left; transition: background 0.12s; }
   .menu-btn:hover { background: rgba(120,200,255,0.22); }
+
+  #wallet { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); pointer-events: auto; z-index: 56; font-family: 'Inter', system-ui, sans-serif; color: #fff; }
+  .wallet-panel { width: min(420px, 93vw); background: linear-gradient(160deg,#142a20,#0e1714); border: 1px solid rgba(20,241,149,0.28); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow: hidden; }
+  .wallet-head { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(20,241,149,0.06); font-size: 19px; font-weight: 800; }
+  .wallet-head span { flex: 1; }
+  #wallet-close { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+  #wallet-close:hover { background: rgba(255,80,80,0.6); }
+  .wallet-note { padding: 22px 18px; font-size: 14px; line-height: 1.6; color: #ffd9a8; text-align: center; }
+  #wallet-body { padding: 16px 18px 6px; }
+  .wallet-bal { display: flex; gap: 10px; margin-bottom: 10px; }
+  .wbal { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 10px 12px; }
+  .wbal-k { display: block; font-size: 11px; opacity: 0.75; margin-bottom: 3px; }
+  .wbal-v { font-size: 18px; font-weight: 800; color: #c9ffe8; }
+  .wallet-rate { font-size: 12px; opacity: 0.78; }
+  .wallet-daily { font-size: 12px; color: #ffd56b; margin-top: 3px; }
+  .wallet-sec { margin-top: 14px; }
+  .wsec-title { font-size: 13px; font-weight: 700; margin-bottom: 7px; }
+  .wrow { display: flex; gap: 8px; }
+  .wrow input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.18); border-radius: 9px; background: rgba(0,0,0,0.3); color: #fff; font-size: 14px; font-family: inherit; }
+  .wrow input:focus { outline: none; border-color: #14F195; }
+  .wrow button { padding: 10px 16px; border: none; border-radius: 9px; background: #14F195; color: #06281c; font-weight: 800; font-size: 14px; cursor: pointer; transition: filter 0.12s; }
+  .wrow button:hover { filter: brightness(1.1); }
+  .wrow button:disabled { opacity: 0.5; cursor: default; }
+  .whint { font-size: 11px; opacity: 0.6; margin-top: 6px; }
+  .wallet-msg { min-height: 18px; margin: 12px 0 4px; font-size: 13px; font-weight: 600; color: #8effc8; }
+  .wallet-msg.err { color: #ff8a8a; }
+  .wallet-foot { padding: 12px 18px; font-size: 11px; opacity: 0.55; text-align: center; border-top: 1px solid rgba(255,255,255,0.08); }
 
   /* Login overlay */
   #auth { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8,12,22,0.82); pointer-events: auto; z-index: 60; font-family: 'Inter', system-ui, sans-serif; color: #fff; }

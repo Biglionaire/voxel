@@ -1469,7 +1469,11 @@ startServer(world => {
           const pe2 = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
           if (pe2) (inFlatland(pe2.position.x, pe2.position.z) ? exitFlatland : enterFlatland)(player);
         }
-        if (data?.type === 'open-wallet') { if (menuOpen.get(player) === 'wallet') closeMenu(player); else openMenu(player, 'wallet'); }
+        if (data?.type === 'open-wallet') { if (walletOpen.has(player)) closeWalletPanel(player); else openWalletPanel(player); }
+        if (data?.type === 'wallet-close') closeWalletPanel(player);
+        if (data?.type === 'withdraw') doCashout(player, Math.floor(Number(data.amount)));
+        if (data?.type === 'deposit') handleDeposit(player, String(data.sig ?? ''));
+        if (data?.type === 'open-bag') { if (bagOpen.has(player)) closeBag(player); else openBag(player); }
       });
     } catch (e) { console.warn('ui hook error', e); }
 
@@ -1558,17 +1562,72 @@ startServer(world => {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.CUBIT_INTERNAL_KEY ?? '' }, body: JSON.stringify({ wallet, gold: amt }),
       });
       const data: any = await res.json();
-      if (!data.ok) throw new Error(data.error || 'failed');
+      if (!data.ok) {
+        addItem(player, 'gold-ingot', amt); // refund — nothing left the treasury
+        if (data.code === 'cap') {
+          toast(player, '🚫 Daily limit reached!');
+          world.chatManager.sendPlayerMessage(player, `🚫 Daily cash-out limit reached (max ${data.error?.replace('daily cap ', '') ?? '1 USDC'} per 24h). Gold refunded — try again tomorrow.`, 'FF8844');
+        } else if (data.code === 'min') {
+          toast(player, '⚠️ Below minimum');
+          world.chatManager.sendPlayerMessage(player, `⚠️ Minimum cash-out is ${data.error?.replace('min ', '').replace(' gold', '') ?? '50000'} gold. Gold refunded.`, 'FF8844');
+        } else throw new Error(data.error || 'failed');
+        refreshWallet(player); return;
+      }
       toast(player, `✅ Cashed out ${data.tokens} ${data.symbol}!`);
       world.chatManager.sendPlayerMessage(player, `✅ ${amt} gold → ${data.tokens} ${data.symbol} (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
     } catch (e) {
       addItem(player, 'gold-ingot', amt); // refund on failure
       world.chatManager.sendPlayerMessage(player, `❌ Cash out failed — gold refunded. (${e})`, 'FF5555');
     }
-    if (menuOpen.get(player) === 'wallet') sendMenu(player, 'wallet');
+    refreshWallet(player);
+  }
+  // ── In-game Wallet panel (input-driven deposit + withdraw) ──────────────────
+  const walletOpen = new Set<any>();
+  let cubitInfoCache: any = null;
+  async function openWalletPanel(player: any) {
+    walletOpen.add(player);
+    try { player.ui.lockPointer(false); } catch {}
+    const wallet = isWalletAcct(player);
+    const token = tokenOf.get(player);
+    let usdc: number | null = null, dailyLeft: number | null = null;
+    let symbol = 'USDC', rate = 100000, minGold = 50000, treasury: string | null = null, mint: string | null = null, decimals = 6;
+    try {
+      cubitInfoCache ??= await (await fetch(`${CUBIT_BACKEND}/api/cubit/info`)).json();
+      const info = cubitInfoCache;
+      symbol = info.symbol ?? symbol; rate = info.rate ?? rate; minGold = info.minGold ?? minGold;
+      treasury = info.treasury ?? null; mint = info.mint ?? null; decimals = info.decimals ?? decimals;
+      if (token && wallet) {
+        const bal: any = await (await fetch(`${CUBIT_BACKEND}/api/cubit/balance`, { headers: { Authorization: `Bearer ${token}` } })).json();
+        usdc = bal.reward ?? null; dailyLeft = bal.dailyLeft ?? null;
+      }
+    } catch {}
+    try {
+      player.ui.sendData({ type: 'wallet', open: true, wallet, gold: goldOf(player), usdc, dailyLeft, symbol, rate, minGold, treasury, mint, decimals });
+    } catch {}
+  }
+  function closeWalletPanel(player: any) { if (!walletOpen.has(player)) return; walletOpen.delete(player); try { player.ui.sendData({ type: 'wallet', open: false }); player.ui.lockPointer(true); } catch {} }
+  function refreshWallet(player: any) { if (walletOpen.has(player)) openWalletPanel(player); }
+  async function handleDeposit(player: any, sig: string) {
+    const token = tokenOf.get(player);
+    if (!token || !isWalletAcct(player)) { toast(player, 'Connect a Solana wallet to deposit.'); return; }
+    if (!sig) { toast(player, '❌ Deposit cancelled.'); refreshWallet(player); return; }
+    toast(player, '💠 Verifying deposit on-chain…');
+    try {
+      const res = await fetch(`${CUBIT_BACKEND}/api/cubit/deposit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ sig }),
+      });
+      const data: any = await res.json();
+      if (!data.ok) throw new Error(data.error || 'failed');
+      addItem(player, 'gold-ingot', data.credited); sendHud(player); await saveProfile(player);
+      toast(player, `✅ Deposited — +${data.credited} gold!`);
+      world.chatManager.sendPlayerMessage(player, `✅ Deposit confirmed: +${data.credited} gold.`, '14F195');
+    } catch (e) {
+      world.chatManager.sendPlayerMessage(player, `❌ Deposit failed: ${e}`, 'FF5555'); toast(player, '❌ Deposit failed');
+    }
+    refreshWallet(player);
   }
   world.chatManager.registerCommand('/cashout', (player, args) => doCashout(player, Number(args[0] ?? '0')));
-  world.chatManager.registerCommand('/wallet', player => { if (menuOpen.get(player) === 'wallet') closeMenu(player); else openMenu(player, 'wallet'); });
+  world.chatManager.registerCommand('/wallet', player => { if (walletOpen.has(player)) closeWalletPanel(player); else openWalletPanel(player); });
   world.chatManager.registerCommand('/top', async player => {
     try {
       const data: any = await (await fetch(`${process.env.CUBIT_BACKEND_URL ?? 'http://localhost:3001'}/api/leaderboard`)).json();
