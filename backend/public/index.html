@@ -204,12 +204,15 @@
       const c = document.getElementById('ca-copy'); c.textContent = '✅'; setTimeout(() => c.textContent = '📋', 1200);
     });
     document.getElementById('w-deposit').addEventListener('click', async () => {
-      const btn = document.getElementById('w-deposit'), amt = parseInt(document.getElementById('d-amt').value, 10), m = document.getElementById('w-msg');
+      const btn = document.getElementById('w-deposit'), amt = parseFloat(document.getElementById('d-amt').value), m = document.getElementById('w-msg');
       if (!(amt > 0)) { m.textContent = 'Enter an amount.'; return; }
       if (!window.cubitDeposit) { m.textContent = 'Deposit module still loading…'; return; }
       btn.disabled = true; m.textContent = 'Approve the transfer in your wallet…';
       try {
-        const r = await window.cubitDeposit(amt);
+        const info = await (await fetch('/api/cubit/info')).json();
+        const sig = await window.cubitDeposit(amt, info);            // same-origin bundle → returns the tx signature
+        m.textContent = 'Confirming on-chain…';
+        const r = await (await fetch('/api/cubit/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ sig }) })).json();
         if (!r.ok) throw new Error(r.error || 'failed');
         m.textContent = '✅ Deposited ' + amt + ' ' + (document.getElementById('w-sym').textContent || 'USDC') + ' → +' + r.credited + ' gold!';
         await loadWallet();
@@ -218,26 +221,9 @@
     });
   </script>
   <script type="module">
-    // Phantom deposit: build an SPL transfer of $CUBIT to the treasury, sign+send, then claim gold.
-    import { Connection, PublicKey, Transaction, clusterApiUrl } from 'https://esm.sh/@solana/web3.js@1.95.3';
-    import { getAssociatedTokenAddress, createTransferInstruction } from 'https://esm.sh/@solana/spl-token@0.4.9';
-    window.cubitDeposit = async (amount) => {
-      const info = await (await fetch('/api/cubit/info')).json();
-      if (!info.enabled) throw new Error('$CUBIT not configured');
-      const conn = new Connection(info.clientRpc || clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
-      const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
-      const user = new PublicKey(window.solana.publicKey.toString());
-      const fromAta = await getAssociatedTokenAddress(mint, user);
-      const toAta = await getAssociatedTokenAddress(mint, treasury);
-      const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** info.decimals))));
-      tx.feePayer = user;
-      tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-      // Sign only, submit, return immediately — the backend verifies + waits for
-      // confirmation (with retries), so no client-side confirmation timeout.
-      const signed = await window.solana.signTransaction(tx);
-      const signature = await conn.sendRawTransaction(signed.serialize(), { maxRetries: 3 });
-      return await (await fetch('/api/cubit/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ sig: signature }) })).json();
-    };
+    // Load the Solana deposit helper from OUR OWN origin (no third-party CDN / remote
+    // code execution — that pattern triggers Safe Browsing). Defines window.cubitDeposit.
+    import('/deposit-bundle.js').catch(() => {});
   </script>
 </body>
 </html>
