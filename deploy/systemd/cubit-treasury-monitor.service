@@ -1,0 +1,9 @@
+[Unit]
+Description=CUBIT treasury balance monitor (one-shot, run by .timer)
+After=network-online.target cubit-backend.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cubit/backend
+EnvironmentFile=/opt/cubit/deploy/.env
+ExecStart=/root/.bun/bin/bun /opt/cubit/backend/treasury-monitor.mjs
