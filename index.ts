@@ -1310,7 +1310,7 @@ startServer(world => {
           }, delay);
         }
       } else {
-        world.chatManager.sendPlayerMessage(player, '🎣 You need a fishing-rod — press R to open the Marketplace, then buy one (15🪙).', 'FF8844');
+        world.chatManager.sendPlayerMessage(player, `🎣 You need a fishing-rod — press R to open the Marketplace, then buy one (${SHOP_BUY['fishing-rod']}🪙).`, 'FF8844');
         toast(player, '🎣 Need a fishing-rod (press R)');
       }
     }
@@ -1774,10 +1774,11 @@ startServer(world => {
     }, r.time);
   }
 
+  const MEAL_COST = 300; // tavern meal (+40 HP) — $-pegged with the marketplace (×100 of the old 3)
   const menuOpen = new Map<any, string>(); // player -> 'clinic' | 'tavern' | 'workbench'
   function sendMenu(player: any, kind: string) {
     let title: string, buttons: { label: string; action: string }[];
-    if (kind === 'clinic') { title = '🏥 Clinic'; buttons = [{ label: '❤️ Heal to full (free)', action: 'heal' }, { label: '🩹 Buy a Golden Apple (8🪙)', action: 'buy-apple' }]; }
+    if (kind === 'clinic') { title = '🏥 Clinic'; buttons = [{ label: '❤️ Heal to full (free)', action: 'heal' }, { label: `🩹 Buy a Golden Apple (${SHOP_BUY['golden-apple']}🪙)`, action: 'buy-apple' }]; }
     else if (kind === 'workbench') {
       title = '🔨 Workbench — craft';
       const inv = getInv(player);
@@ -1798,7 +1799,7 @@ startServer(world => {
         if (g >= 100000) buttons.push({ label: '💵 Cash out 100,000 gold → 1 USDC (daily max)', action: 'cashout:100000' });
       }
     }
-    else { title = '🍺 Tavern'; buttons = [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: '🍺 Order a meal (+40 HP, 3🪙)', action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }]; }
+    else { title = '🍺 Tavern'; buttons = [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: `🍺 Order a meal (+40 HP, ${MEAL_COST}🪙)`, action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }]; }
     player.ui.sendData({ type: 'menu', open: true, kind, title, gold: goldOf(player), hp: hp.get(player) ?? MAX_HP, buttons });
   }
   function openMenu(player: any, kind: string) { menuOpen.set(player, kind); try { player.ui.lockPointer(false); } catch {} sendMenu(player, kind); }
@@ -1811,7 +1812,7 @@ startServer(world => {
     if (action.startsWith('cashout:')) { doCashout(player, Number(action.slice(8))); return; }
     if (action === 'heal' || action === 'rest') { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '❤️ Fully healed.', '66FF66'); }
     else if (action === 'buy-apple') { world.chatManager.sendPlayerMessage(player, buyItem(player, 'golden-apple'), '88FF88'); }
-    else if (action === 'meal') { if (goldOf(player) >= 3) { const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - 3); hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '🍺 Enjoyed a hearty meal! (+HP)', '66FF66'); } else world.chatManager.sendPlayerMessage(player, 'Need 3 🪙.', 'FF8844'); }
+    else if (action === 'meal') { if (goldOf(player) >= MEAL_COST) { const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - MEAL_COST); hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '🍺 Enjoyed a hearty meal! (+HP)', '66FF66'); } else world.chatManager.sendPlayerMessage(player, `Need ${MEAL_COST} 🪙.`, 'FF8844'); }
     else if (action === 'cook-all') {
       const inv = getInv(player); let cooked = 0;
       for (const [raw, done] of [['cod-raw', 'cod-cooked'], ['salmon-raw', 'salmon-cooked']] as const) {
