@@ -33,6 +33,23 @@ export async function getCubitBalance(wallet: string): Promise<number> {
   } catch { return 0; }
 }
 
+/** Verify a confirmed tx that sent $CUBIT from `fromWallet` to the treasury.
+ * Returns the amount received by the treasury (0 if invalid). */
+export async function verifyDeposit(sig: string, fromWallet: string): Promise<number> {
+  if (!treasury || !mint || !isPubkey(fromWallet)) return 0;
+  try {
+    const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
+    if (!tx || tx.meta?.err) return 0;
+    const mintStr = mint.toBase58(), treas = treasury.publicKey.toBase58();
+    const pre = tx.meta?.preTokenBalances ?? [], post = tx.meta?.postTokenBalances ?? [];
+    const bal = (arr: any[], owner: string) => { const e = arr.find((b: any) => b.mint === mintStr && b.owner === owner); return e ? Number(e.uiTokenAmount?.uiAmount ?? 0) : 0; };
+    const received = bal(post, treas) - bal(pre, treas);
+    const sent = bal(pre, fromWallet) - bal(post, fromWallet);
+    if (received > 0 && sent > 0 && Math.abs(received - sent) < 1e-6) return received;
+    return 0;
+  } catch { return 0; }
+}
+
 /** Treasury → wallet transfer of `amount` $CUBIT. Returns the tx signature. */
 export async function sendCubit(wallet: string, amount: number): Promise<string> {
   if (!treasury || !mint) throw new Error('Solana not configured');

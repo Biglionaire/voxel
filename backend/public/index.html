@@ -45,6 +45,11 @@
     .wwithdraw input { flex: 1; }
     .wwithdraw button { padding: 0 16px; border: none; border-radius: 10px; cursor: pointer; font-weight: 800; color: #0e1320; background: linear-gradient(90deg,#9945FF,#14F195); }
     .wwithdraw button:disabled { opacity: 0.6; }
+    .ca { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 11px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; cursor: pointer; font-size: 12px; }
+    .ca:hover { border-color: #14F195; }
+    .ca-label { color: #9945FF; font-weight: 800; white-space: nowrap; }
+    .ca-addr { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,0.85); font-family: monospace; }
+    .orynth { display: block; text-align: center; margin-top: 12px; }
     .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
     .msg.err { color: #ff7a7a; } .msg.ok { color: #7ed957; }
 
@@ -67,7 +72,15 @@
     <a class="go bigplay" id="play" href="https://play.cubit.cash/?join=game.cubit.cash:8080"
        style="display:block;text-align:center;text-decoration:none;line-height:1.2">▶ PLAY NOW</a>
     <button class="walletbtn" id="wallet" type="button">🔗 Connect Wallet (Solana)</button>
-    <a class="xbtn" id="xbtn" href="https://x.com" target="_blank" rel="noopener">𝕏 &nbsp;Follow on X</a>
+    <a class="xbtn" id="xbtn" href="https://x.com/cubitcash" target="_blank" rel="noopener">𝕏 &nbsp;Follow @cubitcash</a>
+    <div class="ca" id="ca" title="Click to copy $CUBIT contract address">
+      <span class="ca-label">$CUBIT CA</span>
+      <span class="ca-addr" id="ca-addr">9oA6TFkdpaStyWJqUkX5dCMQAktSM16rjLtS7Vgaory</span>
+      <span class="ca-copy" id="ca-copy">📋</span>
+    </div>
+    <a class="orynth" href="https://orynth.dev/projects/cubit-cash" target="_blank" rel="noopener">
+      <img src="https://orynth.dev/api/badge/cubit-cash?theme=light&style=minimal" alt="Featured on Orynth" width="152" height="48" />
+    </a>
     <div class="msg" id="wmsg">Play as guest in-game, or connect your Solana wallet to register.</div>
     <div id="wdash" style="display:none">
       <div class="wrow"><span>🪙 In-game gold</span><b id="w-gold">0</b></div>
@@ -148,6 +161,10 @@
       btn.disabled = false;
     });
     document.getElementById('w-play').addEventListener('click', () => location.href = '/play?token=' + encodeURIComponent(window.cubitToken));
+    document.getElementById('ca').addEventListener('click', () => {
+      try { navigator.clipboard.writeText('9oA6TFkdpaStyWJqUkX5dCMQAktSM16rjLtS7Vgaory'); } catch (e) {}
+      const c = document.getElementById('ca-copy'); c.textContent = '✅'; setTimeout(() => c.textContent = '📋', 1200);
+    });
   </script>
 </body>
 </html>

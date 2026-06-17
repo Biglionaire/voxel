@@ -11,7 +11,7 @@
 
 import { Database } from 'bun:sqlite';
 import { createHmac, timingSafeEqual, verify as edVerify, createPublicKey, randomBytes } from 'crypto';
-import { solanaEnabled, treasuryAddress, mintAddress, getCubitBalance, sendCubit } from './solana';
+import { solanaEnabled, treasuryAddress, mintAddress, getCubitBalance, sendCubit, verifyDeposit } from './solana';
 
 const isWalletName = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s); // base58 Solana pubkey
 const getProfileData = (username: string): any => { const row = db.query('SELECT data FROM profiles WHERE username = ?').get(username) as any; return row ? JSON.parse(row.data) : {}; };
@@ -59,6 +59,12 @@ db.run(`CREATE TABLE IF NOT EXISTS profiles (
   username TEXT PRIMARY KEY,
   data TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+)`);
+db.run(`CREATE TABLE IF NOT EXISTS deposits (
+  sig TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  ts INTEGER NOT NULL
 )`);
 
 /* ---------------- Tokens (HMAC, no deps) ---------------- */
@@ -187,6 +193,25 @@ Bun.serve({
         pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + amt; setProfileData(username, pd); // refund
         return json({ error: 'Transfer failed: ' + (e?.message || e) }, 500);
       }
+    }
+
+    // Deposit: verify a confirmed on-chain transfer of $CUBIT to the treasury → credit gold (1:1).
+    if (pathname === '/api/cubit/deposit' && req.method === 'POST') {
+      const username = verifyToken(bearer(req));
+      if (!username) return json({ error: 'Unauthorized.' }, 401);
+      if (!isWalletName(username)) return json({ error: 'Connect with a Solana wallet to deposit.' }, 400);
+      if (!solanaEnabled) return json({ error: '$CUBIT not configured.' }, 503);
+      const { sig } = await req.json().catch(() => ({}));
+      if (!sig || typeof sig !== 'string') return json({ error: 'Missing transaction signature.' }, 400);
+      if (db.query('SELECT 1 FROM deposits WHERE sig = ?').get(sig)) return json({ error: 'That deposit was already credited.' }, 400);
+      const amount = await verifyDeposit(sig, username);
+      if (!(amount > 0)) return json({ error: 'No valid $CUBIT deposit to the treasury found in that transaction.' }, 400);
+      const gold = Math.floor(amount);
+      db.run('INSERT INTO deposits (sig, username, amount, ts) VALUES (?, ?, ?, ?)', [sig, username, gold, Date.now()]);
+      const pd = getProfileData(username); if (!pd.inventory) pd.inventory = {};
+      pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + gold;
+      setProfileData(username, pd);
+      return json({ ok: true, credited: gold });
     }
 
     // Internal: the game server sends $CUBIT after it has already debited in-game gold.
