@@ -385,38 +385,44 @@
 <!-- In-game Phantom deposit: build an SPL transfer of the reward token to the treasury, sign+send.
      Returns the signature; the game server verifies it and credits gold. -->
 <script type="module">
-  // Load lazily with a fallback CDN so a slow/blocked esm.sh doesn't silently leave
-  // window.cubitDeposit undefined. The deposit button waits for this to resolve.
-  async function loadSolana() {
-    const cdns = ['https://esm.sh', 'https://cdn.jsdelivr.net/npm'];
-    for (const base of cdns) {
-      try {
-        const web3 = await import(`${base}/@solana/web3.js@1.95.3${base.includes('jsdelivr') ? '/+esm' : ''}`);
-        const spl = await import(`${base}/@solana/spl-token@0.4.9${base.includes('jsdelivr') ? '/+esm' : ''}`);
-        return { web3, spl };
-      } catch (e) { /* try next CDN */ }
-    }
-    throw new Error('could not load Solana libs');
+  // The HYTOPIA game-client iframe blocks external CDNs (esm.sh/jsdelivr), so load the
+  // pre-built Solana bundle SAME-ORIGIN first (./deposit-bundle.js defines window.cubitDeposit);
+  // fall back to a CORS copy on cubit.cash, then public CDNs for the landing/non-sandboxed.
+  function mkDeposit(web3, spl) {
+    const { Connection, PublicKey, Transaction, clusterApiUrl } = web3;
+    const { getAssociatedTokenAddress, createTransferInstruction } = spl;
+    return async (amount, info) => {
+      const p = window.solana;
+      if (!p) throw new Error('Phantom not detected in the game window.');
+      if (!p.isConnected || !p.publicKey) await p.connect();
+      const conn = new Connection(info.clientRpc || clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
+      const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
+      const user = new PublicKey(p.publicKey.toString());
+      const fromAta = await getAssociatedTokenAddress(mint, user);
+      const toAta = await getAssociatedTokenAddress(mint, treasury);
+      const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** (info.decimals || 6)))));
+      tx.feePayer = user;
+      tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+      const { signature } = await p.signAndSendTransaction(tx);
+      await conn.confirmTransaction(signature, 'confirmed');
+      return signature;
+    };
   }
-  const { web3, spl } = await loadSolana();
-  const { Connection, PublicKey, Transaction, clusterApiUrl } = web3;
-  const { getAssociatedTokenAddress, createTransferInstruction } = spl;
-  window.cubitDeposit = async (amount, info) => {
-    const p = window.solana;
-    if (!p) throw new Error('Phantom not found in-game — deposit from cubit.cash instead.');
-    if (!p.isConnected || !p.publicKey) await p.connect();
-    const conn = new Connection(info.clientRpc || clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
-    const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
-    const user = new PublicKey(p.publicKey.toString());
-    const fromAta = await getAssociatedTokenAddress(mint, user);
-    const toAta = await getAssociatedTokenAddress(mint, treasury);
-    const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** (info.decimals || 6)))));
-    tx.feePayer = user;
-    tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-    const { signature } = await p.signAndSendTransaction(tx);
-    await conn.confirmTransaction(signature, 'confirmed');
-    return signature;
-  };
+  (async () => {
+    // 1) same-origin bundle (defines window.cubitDeposit itself) — survives the iframe CSP
+    for (const url of ['./deposit-bundle.js', 'https://cubit.cash/deposit-bundle.js']) {
+      try { await import(url); if (window.cubitDeposit) return; } catch (e) {}
+    }
+    // 2) public CDNs (landing / non-sandboxed contexts)
+    for (const base of ['https://esm.sh', 'https://cdn.jsdelivr.net/npm']) {
+      try {
+        const sfx = base.includes('jsdelivr') ? '/+esm' : '';
+        const web3 = await import(`${base}/@solana/web3.js@1.95.3${sfx}`);
+        const spl = await import(`${base}/@solana/spl-token@0.4.9${sfx}`);
+        window.cubitDeposit = mkDeposit(web3, spl); return;
+      } catch (e) {}
+    }
+  })();
 </script>
 
 <style>
