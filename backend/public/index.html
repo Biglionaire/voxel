@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="google-site-verification" content="YeFR9PWyqyyztqKzjMVkVo0v73dfec9NOPTnwpNRf80" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CUBIT — Play</title>
   <style>
@@ -221,10 +222,10 @@
       const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** info.decimals))));
       tx.feePayer = user;
       tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-      const { signature } = await window.solana.signAndSendTransaction(tx);
-      // best-effort confirm — the backend re-verifies the sig on-chain (with retries),
-      // so a client-side confirmation timeout must not fail the deposit.
-      try { await conn.confirmTransaction(signature, 'confirmed'); } catch (e) {}
+      // Sign only, submit, return immediately — the backend verifies + waits for
+      // confirmation (with retries), so no client-side confirmation timeout.
+      const signed = await window.solana.signTransaction(tx);
+      const signature = await conn.sendRawTransaction(signed.serialize(), { maxRetries: 3 });
       return await (await fetch('/api/cubit/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ sig: signature }) })).json();
     };
   </script>

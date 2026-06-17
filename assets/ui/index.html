@@ -403,16 +403,15 @@
       const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** (info.decimals || 6)))));
       tx.feePayer = user;
       tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-      const { signature } = await p.signAndSendTransaction(tx);
-      // best-effort: the public RPC often times out confirming even when the tx lands,
-      // so don't fail the deposit on it — the game server verifies the sig on-chain.
-      try { await conn.confirmTransaction(signature, 'confirmed'); } catch (e) {}
-      return signature;
+      // Sign only (no Phantom auto-confirm), submit, return the sig immediately — the
+      // game server verifies + waits for confirmation, so no 30s client-side timeout.
+      const signed = await p.signTransaction(tx);
+      return await conn.sendRawTransaction(signed.serialize(), { maxRetries: 3 });
     };
   }
   (async () => {
     // 1) same-origin bundle (defines window.cubitDeposit itself) — survives the iframe CSP
-    for (const url of ['./deposit-bundle.js', 'https://cubit.cash/deposit-bundle.js']) {
+    for (const url of ['./deposit-bundle.js?v=4', 'https://cubit.cash/deposit-bundle.js?v=4']) {
       try { await import(url); if (window.cubitDeposit) return; } catch (e) {}
     }
     // 2) public CDNs (landing / non-sandboxed contexts)

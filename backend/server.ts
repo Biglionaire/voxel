@@ -318,7 +318,10 @@ Bun.serve({
     // --- Static assets from public/ (bg.png, favicon, …) ---
     if (/^\/[\w.-]+\.(png|jpe?g|webp|gif|svg|ico|css|js)$/.test(pathname)) {
       const f = Bun.file(`${import.meta.dir}/public${pathname}`);
-      if (await f.exists()) return new Response(f, { headers: { 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' } });
+      if (await f.exists()) {
+        const cache = pathname.endsWith('.js') ? 'no-cache' : 'public, max-age=86400'; // JS bundles must stay fresh
+        return new Response(f, { headers: { 'Cache-Control': cache, 'Access-Control-Allow-Origin': '*' } });
+      }
     }
 
     return new Response('Not found', { status: 404 });
