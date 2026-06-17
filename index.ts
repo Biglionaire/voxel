@@ -109,12 +109,14 @@ const PROPS: Record<Biome, { uri: string; collide: boolean; chance: number }[]> 
     { uri: 'models/environment/Plains/flower-tuft.gltf', collide: false, chance: 0.03 },
     { uri: 'models/environment/Plains/bush-berry.gltf', collide: false, chance: 0.02 },
     { uri: 'models/environment/Plains/grass-tall.gltf', collide: false, chance: 0.035 },
+    { uri: 'models/environment/Pine Forest/mossy-boulder.gltf', collide: true, chance: 0.008 },
   ],
   forest: [
     { uri: 'models/environment/Pine Forest/pine-tree-big.gltf', collide: true, chance: 0.022 },
     { uri: 'models/environment/Pine Forest/pine-tree-medium.gltf', collide: true, chance: 0.018 },
     { uri: 'models/environment/Pine Forest/forest-fern.gltf', collide: false, chance: 0.03 },
     { uri: 'models/environment/Pine Forest/redcap-mushroom-group.gltf', collide: false, chance: 0.015 },
+    { uri: 'models/environment/Pine Forest/mossy-boulder.gltf', collide: true, chance: 0.01 },
   ],
   desert: [
     { uri: 'models/environment/Plains/scattered-pebbles.gltf', collide: false, chance: 0.02 },
@@ -142,6 +144,10 @@ const ITEM_EMOJI: Record<string, string> = {
   // fishing
   'fishing-rod': '🎣', 'fishing-rod-2': '🎣', 'fishing-rod-3': '🎏', bait: '🪱', pickup: '🚗',
   'school-bus': '🚌', jetski: '🚤', boat: '⛵', kayak: '🛶', paddle: '🛶',
+  'coal-ore': '⚫', 'iron-ore': '🔩', 'gold-ore': '🟡', 'iron-ingot': '⚙️',
+  'axe-wood': '🪓', 'axe-stone': '🪓', 'axe-iron': '🪓', 'axe-gold': '🪓', 'axe-diamond': '🪓',
+  'pickaxe-wood': '⛏️', 'pickaxe-stone': '⛏️', 'pickaxe-iron': '⛏️', 'pickaxe-gold': '⛏️', 'pickaxe-diamond': '⛏️',
+  plank: '🟫', stick: '🪵',
   'cod-raw': '🐟', 'cod-cooked': '🍤', 'salmon-raw': '🐠', 'salmon-cooked': '🍣',
   pufferfish: '🐡', clownfish: '🐠', catfish: '🐟', parrotfish: '🐠', lionfish: '🐟', sailfish: '🐟', swordfish: '🗡️', anglerfish: '🎏',
 };
@@ -230,21 +236,34 @@ startServer(world => {
   /* --- Scatter biome props ----------------------------------------- */
   const trees = new Set<Entity>(); // choppable trees → wood
   const treeHits = new Map<Entity, number>();
+  const rocks = new Set<Entity>(); // mineable rock/ore nodes → stone + ore
+  const nodeMeta = new Map<Entity, { uri: string; x: number; y: number; z: number; scale: number; kind: 'tree' | 'rock'; ore: string | null }>();
+  const mining = new Map<any, { target: Entity; endAt: number; dur: number }>(); // active mining session per player
   const scenery: { entity: Entity; x: number; z: number }[] = []; // for later town-clearing
+  // Tool tiers = rarity. Higher tier mines faster. Index 0 = bare hands.
+  const TOOL_TIERS = ['wood', 'stone', 'iron', 'gold', 'diamond'];
+  const TIER_SPEED = [1.7, 1.1, 0.8, 0.55, 0.38, 0.25]; // mine-time multiplier by tier (0 = hands)
+  const RARITY = ['Common', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary']; // by tier index
   const townZones: { x: number; z: number; r: number }[] = [];    // village/city footprints to keep clear
   let propCount = 0;
   for (const c of landColumns) {
     let placed = false;
     for (const p of PROPS[c.biome]) {
       if (!placed && Math.random() < p.chance && propCount < 1000) {
+        const scale = 0.7 + Math.random() * 0.6;
         const e = new Entity({
-          modelUri: p.uri,
-          modelScale: 0.7 + Math.random() * 0.6,
+          modelUri: p.uri, modelScale: scale,
           rigidBodyOptions: { type: RigidBodyType.FIXED },
           modelPreferredShape: p.collide ? undefined : ColliderShape.NONE,
         });
         e.spawn(world, { x: c.x + 0.5, y: c.y, z: c.z + 0.5 });
-        if (p.uri.includes('tree')) trees.add(e); // chop for logs
+        const isTree = p.uri.includes('tree');
+        const isRock = p.collide && /boulder|rock|stone|magma|pebble/.test(p.uri);
+        if (isTree || isRock) {
+          const ore = isRock ? pick(['coal-ore', 'coal-ore', 'iron-ore', 'gold-ore', null, null]) : null;
+          nodeMeta.set(e, { uri: p.uri, x: c.x + 0.5, y: c.y, z: c.z + 0.5, scale, kind: isTree ? 'tree' : 'rock', ore });
+          if (isTree) trees.add(e); else rocks.add(e);
+        }
         scenery.push({ entity: e, x: c.x, z: c.z });
         propCount++;
         placed = true;
@@ -520,7 +539,7 @@ startServer(world => {
   const inTown = (x: number, z: number) => townZones.some(t => Math.abs(x - t.x) <= t.r && Math.abs(z - t.z) <= t.r);
   let clearedScenery = 0;
   for (const s of scenery) {
-    if (inTown(s.x, s.z)) { try { s.entity.despawn(); } catch {} trees.delete(s.entity); treeHits.delete(s.entity); clearedScenery++; }
+    if (inTown(s.x, s.z)) { try { s.entity.despawn(); } catch {} trees.delete(s.entity); rocks.delete(s.entity); nodeMeta.delete(s.entity); treeHits.delete(s.entity); clearedScenery++; }
   }
   console.log(`[world] cleared ${clearedScenery} scenery inside towns`);
   // Land away from town centers — for scattering items & mobs without burying them in buildings.
@@ -1105,6 +1124,35 @@ startServer(world => {
     } catch (e) { console.warn('hair error', e); }
   }
 
+  /* --- Mining: trees & rocks are timed harvest nodes that regrow after 3 min.
+   * A better tool (rarity tier) mines faster. Times: tree 3s, rock 5s, ore-rock 10s. */
+  function bestToolTier(player: any, type: 'axe' | 'pickaxe'): number {
+    const inv = getInv(player); let tier = 0;
+    TOOL_TIERS.forEach((m, i) => { if ((inv.get(`${type}-${m}`) ?? 0) > 0) tier = Math.max(tier, i + 1); });
+    return tier;
+  }
+  function respawnNode(meta: { uri: string; x: number; y: number; z: number; scale: number; kind: 'tree' | 'rock'; ore: string | null }) {
+    try {
+      const e = new Entity({ modelUri: meta.uri, modelScale: meta.scale, rigidBodyOptions: { type: RigidBodyType.FIXED } });
+      e.spawn(world, { x: meta.x, y: meta.y, z: meta.z });
+      nodeMeta.set(e, meta);
+      if (meta.kind === 'tree') trees.add(e); else rocks.add(e);
+    } catch {}
+  }
+  function harvestNode(player: any, target: Entity, kind: 'tree' | 'rock') {
+    const meta = nodeMeta.get(target);
+    if (kind === 'tree') { trees.delete(target); addItem(player, 'oak-log', 3 + Math.floor(Math.random() * 3)); toast(player, '🪵 Chopped a tree!'); }
+    else {
+      rocks.delete(target); addItem(player, 'stone', 2 + Math.floor(Math.random() * 3));
+      if (meta?.ore) { addItem(player, meta.ore, 1 + Math.floor(Math.random() * 2)); toast(player, `⛏️ Mined ${meta.ore.replace('-', ' ')}!`); }
+      else toast(player, '⛏️ Mined stone!');
+    }
+    nodeMeta.delete(target);
+    try { target.despawn(); } catch {}
+    try { new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.5 }).play(world); } catch {}
+    if (meta) setTimeout(() => respawnNode(meta), 180000); // regrows after 3 minutes
+  }
+
   /* --- Player input handler (attack / build / interact / eat) ------ */
   function handleInput(player: any, pe: PlayerEntity, input: Record<string, boolean>) {
     const prev = lastInput.get(player) ?? {};
@@ -1206,17 +1254,25 @@ startServer(world => {
               new Audio({ uri: 'audio/sfx/player/player-swing-woosh.mp3', volume: 0.4 }).play(world);
               damageMob(target, ATTACK_DAMAGE, player, dir ? { x: dir.x, z: dir.z } : undefined);
             }
-          } else if (target && trees.has(target) && now - (lastBuild.get(player) ?? 0) > 250) {
-            lastBuild.set(player, now);
-            try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
-            const t = (treeHits.get(target) ?? 0) + 1;
-            if (t >= 3) { // falls after 3 chops
-              trees.delete(target); treeHits.delete(target);
-              try { target.despawn(); } catch {}
-              addItem(player, 'oak-log', 4);
-              world.chatManager.sendPlayerMessage(player, '🪵 Chopped a tree (+4 oak-log)', '88FF88');
-            } else { treeHits.set(target, t); }
-            new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.4 }).play(world);
+          } else if (target && (trees.has(target) || rocks.has(target))) {
+            const kind = trees.has(target) ? 'tree' : 'rock';
+            const meta = nodeMeta.get(target);
+            const base = kind === 'tree' ? 3000 : (meta?.ore ? 10000 : 5000); // 3s / 5s / 10s
+            const tier = bestToolTier(player, kind === 'tree' ? 'axe' : 'pickaxe');
+            const dur = Math.round(base * (TIER_SPEED[tier] ?? 1.7));
+            const sess = mining.get(player);
+            if (!sess || sess.target !== target) {
+              mining.set(player, { target, endAt: now + dur, dur });
+              toast(player, `${kind === 'tree' ? '🪓' : '⛏️'} Mining… ${(dur / 1000).toFixed(1)}s`);
+              try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
+            } else if (now >= sess.endAt) {
+              mining.delete(player); harvestNode(player, target, kind);
+            } else if (now - (lastBuild.get(player) ?? 0) > 600) {
+              lastBuild.set(player, now);
+              toast(player, `${kind === 'tree' ? '🪓' : '⛏️'} ${Math.round((1 - (sess.endAt - now) / sess.dur) * 100)}%`);
+              try { (pe as any).startModelOneshotAnimations?.(['sword-attack-1']); } catch {}
+              try { new Audio({ uri: 'audio/sfx/player/player-swing-woosh.mp3', volume: 0.3 }).play(world); } catch {}
+            }
           } else if (target && placedProps.has(target) && now - (lastBuild.get(player) ?? 0) > 200) {
             lastBuild.set(player, now);
             placedProps.delete(target);
@@ -1395,6 +1451,7 @@ startServer(world => {
   const SHOP_CATEGORIES: Record<string, Record<string, number>> = {
     items: { cobblestone: 1, 'oak-log': 2, stone: 2, bricks: 3, lantern: 3, fence: 1, 'lamp-post': 4, torch: 1, bench: 3, chest: 4, barrel: 2, bookshelf: 5 },
     vehicles: { pickup: 50, 'school-bus': 140, jetski: 80, boat: 60, kayak: 35, paddle: 30 },
+    tools: { 'axe-wood': 8, 'pickaxe-wood': 8, 'axe-stone': 20, 'pickaxe-stone': 20, 'axe-iron': 50, 'pickaxe-iron': 50, 'axe-gold': 110, 'pickaxe-gold': 110 },
     fishing: { bait: 1, 'fishing-rod': 15, 'fishing-rod-2': 45, 'fishing-rod-3': 120 },
     health: { 'golden-apple': 8, bread: 2, cookie: 1, melon: 2, 'cod-cooked': 5, 'salmon-cooked': 8 },
   };
@@ -1407,7 +1464,10 @@ startServer(world => {
     feather: 1, 'creepy-eye': 2, 'ink-bottle': 2, paper: 1, milk: 2, firework: 3, 'name-tag': 4, melon: 1,
     // mined blocks + foraged collectibles are all sellable too
     cobblestone: 1, stone: 1, bricks: 2, 'oak-log': 1, sand: 1, 'grass-block': 1, 'coal-ore': 3, 'iron-ore': 4, 'gold-ore': 6,
-    carrot: 1, 'golden-apple': 4, bread: 1, cookie: 1,
+    carrot: 1, 'golden-apple': 4, bread: 1, cookie: 1, plank: 1, stick: 1,
+    // tools (rarity-priced) + crafted goods are sellable
+    'axe-wood': 4, 'pickaxe-wood': 4, 'axe-stone': 10, 'pickaxe-stone': 10, 'axe-iron': 25, 'pickaxe-iron': 25,
+    'axe-gold': 55, 'pickaxe-gold': 55, 'axe-diamond': 120, 'pickaxe-diamond': 120,
   };
   delete (SHOP_SELL as any)['gold-ingot']; // never sell the currency itself
   const playerBuilding = new Map<any, any>();
