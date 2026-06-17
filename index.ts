@@ -1651,26 +1651,29 @@ startServer(world => {
   /* --- City building services (marketplace, clinic, …) ------------- */
   // gold-ingot is the currency. Prices below are in gold.
   // Buy stock split into marketplace categories (tabs).
+  // Prices are $-pegged at 10,000 gold = 1 USDC (REWARD_RATE). Premium gear floors:
+  // vehicles ≥ $1, fishing rods + axes/pickaxes ≥ $0.5; everything else ×100 from the
+  // original balance so loot (sell side, also ×100) can actually pay for it.
   const SHOP_CATEGORIES: Record<string, Record<string, number>> = {
-    items: { cobblestone: 1, 'oak-log': 2, stone: 2, bricks: 3, lantern: 3, fence: 1, 'lamp-post': 4, torch: 1, bench: 3, chest: 4, barrel: 2, bookshelf: 5 },
-    vehicles: { pickup: 50, 'school-bus': 140, jetski: 80, boat: 60, kayak: 35, paddle: 30 },
-    tools: { 'axe-wood': 8, 'pickaxe-wood': 8, 'axe-stone': 20, 'pickaxe-stone': 20, 'axe-iron': 50, 'pickaxe-iron': 50, 'axe-gold': 110, 'pickaxe-gold': 110, 'axe-diamond': 240, 'pickaxe-diamond': 240 },
-    fishing: { bait: 1, 'fishing-rod': 15, 'fishing-rod-2': 45, 'fishing-rod-3': 120 },
-    health: { 'golden-apple': 8, bread: 2, cookie: 1, melon: 2, 'cod-cooked': 5, 'salmon-cooked': 8 },
+    items: { cobblestone: 100, 'oak-log': 200, stone: 200, bricks: 300, lantern: 300, fence: 100, 'lamp-post': 400, torch: 100, bench: 300, chest: 400, barrel: 200, bookshelf: 500 },
+    vehicles: { paddle: 10000, kayak: 12000, boat: 15000, pickup: 20000, jetski: 25000, 'school-bus': 40000 },
+    tools: { 'axe-wood': 5000, 'pickaxe-wood': 5000, 'axe-stone': 10000, 'pickaxe-stone': 10000, 'axe-iron': 20000, 'pickaxe-iron': 20000, 'axe-gold': 40000, 'pickaxe-gold': 40000, 'axe-diamond': 80000, 'pickaxe-diamond': 80000 },
+    fishing: { bait: 100, 'fishing-rod': 5000, 'fishing-rod-2': 15000, 'fishing-rod-3': 40000 },
+    health: { 'golden-apple': 800, bread: 200, cookie: 100, melon: 200, 'cod-cooked': 500, 'salmon-cooked': 800 },
   };
   const SHOP_BUY: Record<string, number> = Object.assign({}, ...Object.values(SHOP_CATEGORIES));
   // Sell: every fish + rare + staple item.
   const SHOP_SELL: Record<string, number> = {
-    'cod-raw': 2, 'salmon-raw': 3, 'cod-cooked': 4, 'salmon-cooked': 6,
-    pufferfish: 7, clownfish: 6, catfish: 5, parrotfish: 7, lionfish: 9, sailfish: 11, swordfish: 13, anglerfish: 12,
-    bone: 1, book: 1, compass: 2, clock: 2, 'gold-nugget': 1, 'gold-ingot': 0, 'iron-ingot': 3, 'iron-nugget': 1,
-    feather: 1, 'creepy-eye': 2, 'ink-bottle': 2, paper: 1, milk: 2, firework: 3, 'name-tag': 4, melon: 1,
+    'cod-raw': 200, 'salmon-raw': 300, 'cod-cooked': 400, 'salmon-cooked': 600,
+    pufferfish: 700, clownfish: 600, catfish: 500, parrotfish: 700, lionfish: 900, sailfish: 1100, swordfish: 1300, anglerfish: 1200,
+    bone: 100, book: 100, compass: 200, clock: 200, 'gold-nugget': 100, 'gold-ingot': 0, 'iron-ingot': 300, 'iron-nugget': 100,
+    feather: 100, 'creepy-eye': 200, 'ink-bottle': 200, paper: 100, milk: 200, firework: 300, 'name-tag': 400, melon: 100,
     // mined blocks + foraged collectibles are all sellable too
-    cobblestone: 1, stone: 1, bricks: 2, 'oak-log': 1, sand: 1, 'grass-block': 1, 'coal-ore': 3, 'iron-ore': 4, 'gold-ore': 6, diamond: 12,
-    carrot: 1, 'golden-apple': 4, bread: 1, cookie: 1, plank: 1, stick: 1,
+    cobblestone: 100, stone: 100, bricks: 200, 'oak-log': 100, sand: 100, 'grass-block': 100, 'coal-ore': 300, 'iron-ore': 400, 'gold-ore': 600, diamond: 1200,
+    carrot: 100, 'golden-apple': 400, bread: 100, cookie: 100, plank: 100, stick: 100,
     // tools (rarity-priced) + crafted goods are sellable
-    'axe-wood': 4, 'pickaxe-wood': 4, 'axe-stone': 10, 'pickaxe-stone': 10, 'axe-iron': 25, 'pickaxe-iron': 25,
-    'axe-gold': 55, 'pickaxe-gold': 55, 'axe-diamond': 120, 'pickaxe-diamond': 120,
+    'axe-wood': 400, 'pickaxe-wood': 400, 'axe-stone': 1000, 'pickaxe-stone': 1000, 'axe-iron': 2500, 'pickaxe-iron': 2500,
+    'axe-gold': 5500, 'pickaxe-gold': 5500, 'axe-diamond': 12000, 'pickaxe-diamond': 12000,
   };
   delete (SHOP_SELL as any)['gold-ingot']; // never sell the currency itself
   const playerBuilding = new Map<any, any>();
