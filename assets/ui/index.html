@@ -405,7 +405,7 @@
     const p = window.solana;
     if (!p) throw new Error('Phantom not found in-game — deposit from cubit.cash instead.');
     if (!p.isConnected || !p.publicKey) await p.connect();
-    const conn = new Connection(clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
+    const conn = new Connection(info.clientRpc || clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
     const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
     const user = new PublicKey(p.publicKey.toString());
     const fromAta = await getAssociatedTokenAddress(mint, user);

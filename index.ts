@@ -1590,19 +1590,19 @@ startServer(world => {
     const wallet = isWalletAcct(player);
     const token = tokenOf.get(player);
     let usdc: number | null = null, dailyLeft: number | null = null;
-    let symbol = 'USDC', rate = 100000, minGold = 50000, treasury: string | null = null, mint: string | null = null, decimals = 6, network = 'devnet';
+    let symbol = 'USDC', rate = 100000, minGold = 50000, treasury: string | null = null, mint: string | null = null, decimals = 6, network = 'devnet', clientRpc: string | null = null;
     try {
       cubitInfoCache ??= await (await fetch(`${CUBIT_BACKEND}/api/cubit/info`)).json();
       const info = cubitInfoCache;
       symbol = info.symbol ?? symbol; rate = info.rate ?? rate; minGold = info.minGold ?? minGold;
-      treasury = info.treasury ?? null; mint = info.mint ?? null; decimals = info.decimals ?? decimals; network = info.network ?? network;
+      treasury = info.treasury ?? null; mint = info.mint ?? null; decimals = info.decimals ?? decimals; network = info.network ?? network; clientRpc = info.clientRpc ?? null;
       if (token && wallet) {
         const bal: any = await (await fetch(`${CUBIT_BACKEND}/api/cubit/balance`, { headers: { Authorization: `Bearer ${token}` } })).json();
         usdc = bal.reward ?? null; dailyLeft = bal.dailyLeft ?? null;
       }
     } catch {}
     try {
-      player.ui.sendData({ type: 'wallet', open: true, wallet, gold: goldOf(player), usdc, dailyLeft, symbol, rate, minGold, treasury, mint, decimals, network });
+      player.ui.sendData({ type: 'wallet', open: true, wallet, gold: goldOf(player), usdc, dailyLeft, symbol, rate, minGold, treasury, mint, decimals, network, clientRpc });
     } catch {}
   }
   function closeWalletPanel(player: any) { if (!walletOpen.has(player)) return; walletOpen.delete(player); try { player.ui.sendData({ type: 'wallet', open: false }); player.ui.lockPointer(true); } catch {} }

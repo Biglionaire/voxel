@@ -180,7 +180,11 @@ Bun.serve({
 
     if (pathname === '/api/cubit/info') {
       const network = (process.env.CUBIT_RPC ?? '').includes('mainnet') ? 'mainnet-beta' : 'devnet';
-      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network, faucet: process.env.FAUCET_ENABLED === 'true', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
+      // Browser-usable RPC for client-side deposits. The public api.mainnet-beta RPC
+      // returns 403 to browser origins, so default to a CORS-friendly endpoint; override
+      // with CUBIT_CLIENT_RPC (e.g. a Helius/QuickNode URL) for reliability.
+      const clientRpc = process.env.CUBIT_CLIENT_RPC ?? (network === 'mainnet-beta' ? 'https://solana-rpc.publicnode.com' : 'https://api.devnet.solana.com');
+      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network, clientRpc, faucet: process.env.FAUCET_ENABLED === 'true', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
     }
     if (pathname === '/api/cubit/balance') {
       const username = verifyToken(bearer(req));

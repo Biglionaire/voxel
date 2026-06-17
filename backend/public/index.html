@@ -213,7 +213,7 @@
     window.cubitDeposit = async (amount) => {
       const info = await (await fetch('/api/cubit/info')).json();
       if (!info.enabled) throw new Error('$CUBIT not configured');
-      const conn = new Connection(clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
+      const conn = new Connection(info.clientRpc || clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
       const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
       const user = new PublicKey(window.solana.publicKey.toString());
       const fromAta = await getAssociatedTokenAddress(mint, user);
