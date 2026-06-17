@@ -36,6 +36,8 @@
     .bigplay:hover { filter: brightness(1.06); }
     .xbtn { display: block; text-align: center; text-decoration: none; margin-top: 10px; padding: 11px; border-radius: 10px; font-weight: 700; font-size: 14px; color: #fff; background: #000; border: 1px solid rgba(255,255,255,0.25); }
     .xbtn:hover { background: #181818; }
+    .walletbtn { display: block; width: 100%; margin-top: 10px; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 800; font-size: 15px; color: #fff; background: linear-gradient(90deg, #9945FF, #14F195); border: none; }
+    .walletbtn:hover { filter: brightness(1.08); } .walletbtn:disabled { opacity: 0.6; cursor: default; }
     .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
     .msg.err { color: #ff7a7a; } .msg.ok { color: #7ed957; }
 
@@ -57,8 +59,9 @@
     <div class="tag">Open-world voxel survival</div>
     <a class="go bigplay" id="play" href="https://play.cubit.cash/?join=game.cubit.cash:8080"
        style="display:block;text-align:center;text-decoration:none;line-height:1.2">▶ PLAY NOW</a>
+    <button class="walletbtn" id="wallet" type="button">🔗 Connect Wallet (Solana)</button>
     <a class="xbtn" id="xbtn" href="https://x.com" target="_blank" rel="noopener">𝕏 &nbsp;Follow on X</a>
-    <div class="msg">Log in, sign up, or play as guest right inside the game.</div>
+    <div class="msg" id="wmsg">Play as guest in-game, or connect your Solana wallet to register.</div>
   </div>
 
   <div class="howto">
@@ -85,8 +88,27 @@
   </div>
 
   <script>
-    // Landing is a splash — login / signup / "play as guest" all happen in-game on
-    // the overlay at play.cubit.cash, so there is no separate (double) login here.
+    // Solana wallet registration (Phantom). Signs a nonce to prove ownership, the
+    // backend creates/links an account by wallet address, then we enter the game.
+    const wbtn = document.getElementById('wallet'), wmsg = document.getElementById('wmsg');
+    wbtn.addEventListener('click', async () => {
+      const p = window.solana;
+      if (!p || !p.isPhantom) { window.open('https://phantom.app/', '_blank'); wmsg.textContent = 'Install the Phantom wallet, then try again.'; return; }
+      try {
+        wbtn.disabled = true; wbtn.textContent = 'Connecting…';
+        const resp = await p.connect();
+        const wallet = resp.publicKey.toString();
+        const r1 = await fetch('/api/wallet-nonce', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet }) });
+        const j1 = await r1.json(); if (!j1.message) throw new Error(j1.error || 'nonce failed');
+        const signed = await p.signMessage(new TextEncoder().encode(j1.message), 'utf8');
+        const signature = btoa(String.fromCharCode(...signed.signature));
+        const r2 = await fetch('/api/wallet-verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet, signature }) });
+        const j2 = await r2.json(); if (!j2.token) throw new Error(j2.error || 'verify failed');
+        wbtn.textContent = (j2.isNew ? '✅ Registered' : '✅ Welcome back') + ' — entering…';
+        localStorage.setItem('cubit_token', j2.token);
+        location.href = '/play?token=' + encodeURIComponent(j2.token);
+      } catch (e) { wbtn.disabled = false; wbtn.textContent = '🔗 Connect Wallet (Solana)'; wmsg.textContent = 'Wallet: ' + (e.message || e); }
+    });
   </script>
 </body>
 </html>

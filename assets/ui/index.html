@@ -189,7 +189,12 @@
       menu.style.display = 'flex';
     }
 
-    if (data.type === 'auth-required') document.getElementById('auth').style.display = 'flex';
+    if (data.type === 'auth-required') {
+      // Auto-login if the landing (wallet/login) passed a session token in the URL.
+      let st = null; try { st = new URLSearchParams(location.search).get('sessionToken'); } catch (e) {}
+      if (st) hytopia.sendData({ type: 'auth', mode: 'token', username: st });
+      else document.getElementById('auth').style.display = 'flex';
+    }
     if (data.type === 'auth-ok') { document.getElementById('auth').style.display = 'none'; }
     if (data.type === 'auth-err') { const m = document.getElementById('auth-msg'); m.textContent = data.msg || 'Failed.'; m.className = 'err'; document.getElementById('auth-go').disabled = false; }
   });

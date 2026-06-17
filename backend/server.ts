@@ -10,7 +10,29 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, verify as edVerify, createPublicKey, randomBytes } from 'crypto';
+
+/* ---------------- Solana wallet auth (ed25519, no deps) ---------------- */
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58decode(s: string): Buffer {
+  const bytes: number[] = [0];
+  for (const ch of s) {
+    const v = B58.indexOf(ch); if (v < 0) throw new Error('bad base58');
+    let carry = v;
+    for (let j = 0; j < bytes.length; j++) { carry += bytes[j] * 58; bytes[j] = carry & 0xff; carry >>= 8; }
+    while (carry) { bytes.push(carry & 0xff); carry >>= 8; }
+  }
+  for (const ch of s) { if (ch === '1') bytes.push(0); else break; }
+  return Buffer.from(bytes.reverse());
+}
+function ed25519Verify(message: Buffer, sig: Buffer, pubRaw: Buffer): boolean {
+  try {
+    const der = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), pubRaw]); // SPKI prefix + 32-byte key
+    return edVerify(null, message, createPublicKey({ key: der, format: 'der', type: 'spki' }), sig);
+  } catch { return false; }
+}
+const walletMessage = (wallet: string, nonce: string) => `Sign in to CUBIT\n\nWallet: ${wallet}\nNonce: ${nonce}`;
+const walletNonces = new Map<string, { nonce: string; exp: number }>();
 
 const PORT = Number(process.env.PORT ?? 3001);
 const SECRET = process.env.CUBIT_SECRET ?? 'dev-secret-change-me';
@@ -98,6 +120,32 @@ Bun.serve({
         return json({ error: 'Invalid username or password.' }, 401);
       }
       return json({ token: signToken(username), username });
+    }
+
+    // --- Solana wallet auth: step 1, request a nonce to sign ---
+    if (pathname === '/api/wallet-nonce' && req.method === 'POST') {
+      const { wallet } = await req.json().catch(() => ({}));
+      if (!wallet || typeof wallet !== 'string' || wallet.length < 32 || wallet.length > 48) return json({ error: 'Valid wallet required.' }, 400);
+      const nonce = randomBytes(16).toString('hex');
+      walletNonces.set(wallet, { nonce, exp: Date.now() + 5 * 60 * 1000 });
+      return json({ message: walletMessage(wallet, nonce) });
+    }
+
+    // --- Solana wallet auth: step 2, verify the signature → token (creates account on first connect) ---
+    if (pathname === '/api/wallet-verify' && req.method === 'POST') {
+      const { wallet, signature } = await req.json().catch(() => ({}));
+      const rec = wallet && walletNonces.get(wallet);
+      if (!rec || rec.exp < Date.now()) return json({ error: 'Nonce expired — reconnect your wallet.' }, 400);
+      let ok = false;
+      try {
+        const pub = b58decode(wallet);
+        if (pub.length === 32) ok = ed25519Verify(Buffer.from(walletMessage(wallet, rec.nonce)), Buffer.from(String(signature ?? ''), 'base64'), pub);
+      } catch { ok = false; }
+      if (!ok) return json({ error: 'Signature verification failed.' }, 401);
+      walletNonces.delete(wallet);
+      const exists = db.query('SELECT 1 FROM users WHERE username = ?').get(wallet);
+      if (!exists) db.run('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)', [wallet, 'wallet:' + wallet, Date.now()]);
+      return json({ token: signToken(wallet), username: wallet, wallet, isNew: !exists });
     }
 
     // --- Who am I (token check) ---

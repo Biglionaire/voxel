@@ -1674,6 +1674,30 @@ startServer(world => {
   const authed = new Set<any>();
 
   async function tryAuth(player: any, pe: PlayerEntity, mode: string, username: string, password: string, hair?: number) {
+    if (mode === 'token') { // session token from the landing wallet/login flow (username field carries the token)
+      try {
+        const res = await fetch(`${CUBIT_BACKEND}/api/me`, { headers: { Authorization: `Bearer ${username}` } });
+        const data: any = await res.json();
+        if (!res.ok || !data.username) { player.ui.sendData({ type: 'auth-err', msg: 'Session expired — log in.' }); return; }
+        accountOf.set(player, data.username); tokenOf.set(player, username); authed.add(player);
+        try {
+          const pr = await fetch(`${CUBIT_BACKEND}/api/profile`, { headers: { Authorization: `Bearer ${username}` } });
+          const prof: any = await pr.json();
+          if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
+            const inv = getInv(player); inv.clear();
+            for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
+            if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp);
+            world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
+          }
+          applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0));
+        } catch {}
+        sendHud(player);
+        try { (pe as any).nametagSceneUI?.setState({ username: data.username }); } catch {}
+        try { player.ui.sendData({ type: 'auth-ok', username: data.username }); player.ui.lockPointer(true); } catch {}
+        world.chatManager.sendPlayerMessage(player, `✅ Signed in (${String(data.username).slice(0, 8)}…). Progress auto-saves.`, '00FF00');
+      } catch { try { player.ui.sendData({ type: 'auth-err', msg: 'Cannot verify session.' }); } catch {} }
+      return;
+    }
     if (mode === 'guest') {
       try { player.ui.sendData({ type: 'auth-ok', username: 'Guest' }); player.ui.lockPointer(true); } catch {}
       world.chatManager.sendPlayerMessage(player, 'Playing as Guest — progress will NOT be saved.', 'FFAA44');
