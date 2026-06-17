@@ -222,7 +222,9 @@
       tx.feePayer = user;
       tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
       const { signature } = await window.solana.signAndSendTransaction(tx);
-      await conn.confirmTransaction(signature, 'confirmed');
+      // best-effort confirm — the backend re-verifies the sig on-chain (with retries),
+      // so a client-side confirmation timeout must not fail the deposit.
+      try { await conn.confirmTransaction(signature, 'confirmed'); } catch (e) {}
       return await (await fetch('/api/cubit/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ sig: signature }) })).json();
     };
   </script>

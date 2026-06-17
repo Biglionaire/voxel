@@ -404,7 +404,9 @@
       tx.feePayer = user;
       tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
       const { signature } = await p.signAndSendTransaction(tx);
-      await conn.confirmTransaction(signature, 'confirmed');
+      // best-effort: the public RPC often times out confirming even when the tx lands,
+      // so don't fail the deposit on it — the game server verifies the sig on-chain.
+      try { await conn.confirmTransaction(signature, 'confirmed'); } catch (e) {}
       return signature;
     };
   }
