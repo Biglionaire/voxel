@@ -144,7 +144,7 @@ const ITEM_EMOJI: Record<string, string> = {
   // fishing
   'fishing-rod': '🎣', 'fishing-rod-2': '🎣', 'fishing-rod-3': '🎏', bait: '🪱', pickup: '🚗',
   'school-bus': '🚌', jetski: '🚤', boat: '⛵', kayak: '🛶', paddle: '🛶',
-  'coal-ore': '⚫', 'iron-ore': '🔩', 'gold-ore': '🟡', 'iron-ingot': '⚙️',
+  'coal-ore': '⚫', 'iron-ore': '🔩', 'gold-ore': '🟡', 'iron-ingot': '⚙️', diamond: '💎',
   'axe-wood': '🪓', 'axe-stone': '🪓', 'axe-iron': '🪓', 'axe-gold': '🪓', 'axe-diamond': '🪓',
   'pickaxe-wood': '⛏️', 'pickaxe-stone': '⛏️', 'pickaxe-iron': '⛏️', 'pickaxe-gold': '⛏️', 'pickaxe-diamond': '⛏️',
   plank: '🟫', stick: '🪵',
@@ -260,7 +260,7 @@ startServer(world => {
         const isTree = p.uri.includes('tree');
         const isRock = p.collide && /boulder|rock|stone|magma|pebble/.test(p.uri);
         if (isTree || isRock) {
-          const ore = isRock ? pick(['coal-ore', 'coal-ore', 'iron-ore', 'gold-ore', null, null]) : null;
+          const ore = isRock ? pick(['coal-ore', 'coal-ore', 'iron-ore', 'iron-ore', 'gold-ore', 'diamond', null, null, null, null]) : null;
           nodeMeta.set(e, { uri: p.uri, x: c.x + 0.5, y: c.y, z: c.z + 0.5, scale, kind: isTree ? 'tree' : 'rock', ore });
           if (isTree) trees.add(e); else rocks.add(e);
         }
@@ -580,6 +580,7 @@ startServer(world => {
   const players = new Set<any>();
   const hp = new Map<any, number>();
   const xp = new Map<any, number>(); // total XP per player (drives level)
+  const lastDaily = new Map<any, number>(); // last daily-reward claim timestamp
   const inventory = new Map<any, Map<string, number>>();
   const lastInput = new Map<any, Record<string, boolean>>();
   const lastAttack = new Map<any, number>();
@@ -629,6 +630,17 @@ startServer(world => {
       try { new Audio({ uri: 'audio/sfx/ui/inventory-place-item.mp3', volume: 0.6 }).play(world); } catch {}
     }
     sendHud(player);
+  }
+
+  // Daily login reward (once per 20h) — granted on sign-in for saved accounts.
+  function grantDaily(player: any) {
+    const now = Date.now();
+    if (now - (lastDaily.get(player) ?? 0) < 20 * 60 * 60 * 1000) return;
+    lastDaily.set(player, now);
+    addItem(player, 'gold-ingot', 50);
+    toast(player, '🎁 Daily reward: +50 🪙');
+    try { world.chatManager.sendPlayerMessage(player, '🎁 Daily login reward: +50 gold! Come back tomorrow for more.', 'FFD700'); } catch {}
+    try { saveProfile(player); } catch {}
   }
 
   /* --- Achievements: lifetime milestones that auto-reward gold + XP. --- */
@@ -1516,7 +1528,7 @@ startServer(world => {
   const SHOP_CATEGORIES: Record<string, Record<string, number>> = {
     items: { cobblestone: 1, 'oak-log': 2, stone: 2, bricks: 3, lantern: 3, fence: 1, 'lamp-post': 4, torch: 1, bench: 3, chest: 4, barrel: 2, bookshelf: 5 },
     vehicles: { pickup: 50, 'school-bus': 140, jetski: 80, boat: 60, kayak: 35, paddle: 30 },
-    tools: { 'axe-wood': 8, 'pickaxe-wood': 8, 'axe-stone': 20, 'pickaxe-stone': 20, 'axe-iron': 50, 'pickaxe-iron': 50, 'axe-gold': 110, 'pickaxe-gold': 110 },
+    tools: { 'axe-wood': 8, 'pickaxe-wood': 8, 'axe-stone': 20, 'pickaxe-stone': 20, 'axe-iron': 50, 'pickaxe-iron': 50, 'axe-gold': 110, 'pickaxe-gold': 110, 'axe-diamond': 240, 'pickaxe-diamond': 240 },
     fishing: { bait: 1, 'fishing-rod': 15, 'fishing-rod-2': 45, 'fishing-rod-3': 120 },
     health: { 'golden-apple': 8, bread: 2, cookie: 1, melon: 2, 'cod-cooked': 5, 'salmon-cooked': 8 },
   };
@@ -1528,7 +1540,7 @@ startServer(world => {
     bone: 1, book: 1, compass: 2, clock: 2, 'gold-nugget': 1, 'gold-ingot': 0, 'iron-ingot': 3, 'iron-nugget': 1,
     feather: 1, 'creepy-eye': 2, 'ink-bottle': 2, paper: 1, milk: 2, firework: 3, 'name-tag': 4, melon: 1,
     // mined blocks + foraged collectibles are all sellable too
-    cobblestone: 1, stone: 1, bricks: 2, 'oak-log': 1, sand: 1, 'grass-block': 1, 'coal-ore': 3, 'iron-ore': 4, 'gold-ore': 6,
+    cobblestone: 1, stone: 1, bricks: 2, 'oak-log': 1, sand: 1, 'grass-block': 1, 'coal-ore': 3, 'iron-ore': 4, 'gold-ore': 6, diamond: 12,
     carrot: 1, 'golden-apple': 4, bread: 1, cookie: 1, plank: 1, stick: 1,
     // tools (rarity-priced) + crafted goods are sellable
     'axe-wood': 4, 'pickaxe-wood': 4, 'axe-stone': 10, 'pickaxe-stone': 10, 'axe-iron': 25, 'pickaxe-iron': 25,
@@ -1606,6 +1618,8 @@ startServer(world => {
     'pickaxe-stone': { in: { stone: 3, stick: 2 }, out: 1, time: 5000, label: '⛏️ Stone Pickaxe (Uncommon)' },
     'axe-iron': { in: { 'iron-ingot': 3, stick: 2 }, out: 1, time: 10000, label: '🪓 Iron Axe (Rare)' },
     'pickaxe-iron': { in: { 'iron-ingot': 3, stick: 2 }, out: 1, time: 10000, label: '⛏️ Iron Pickaxe (Rare)' },
+    'axe-diamond': { in: { diamond: 3, stick: 2 }, out: 1, time: 10000, label: '🪓 Diamond Axe (Legendary)' },
+    'pickaxe-diamond': { in: { diamond: 3, stick: 2 }, out: 1, time: 10000, label: '⛏️ Diamond Pickaxe (Legendary)' },
   };
   const crafting = new Set<any>(); // players mid-craft (one at a time)
   function craftItem(player: any, key: string) {
@@ -1746,10 +1760,10 @@ startServer(world => {
           if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
             const inv = getInv(player); inv.clear();
             for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
-            if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp); if (prof.data.stats) stats.set(player, prof.data.stats); if (Array.isArray(prof.data.claimed)) claimed.set(player, new Set(prof.data.claimed));
+            if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp); if (typeof prof.data.daily === 'number') lastDaily.set(player, prof.data.daily); if (prof.data.stats) stats.set(player, prof.data.stats); if (Array.isArray(prof.data.claimed)) claimed.set(player, new Set(prof.data.claimed));
             world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
           }
-          applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0));
+          applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0)); grantDaily(player);
         } catch {}
         sendHud(player);
         try { (pe as any).nametagSceneUI?.setState({ username: data.username }); } catch {}
@@ -1777,10 +1791,10 @@ startServer(world => {
         if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
           const inv = getInv(player); inv.clear();
           for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
-          if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp); if (prof.data.stats) stats.set(player, prof.data.stats); if (Array.isArray(prof.data.claimed)) claimed.set(player, new Set(prof.data.claimed));
+          if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp); if (typeof prof.data.daily === 'number') lastDaily.set(player, prof.data.daily); if (prof.data.stats) stats.set(player, prof.data.stats); if (Array.isArray(prof.data.claimed)) claimed.set(player, new Set(prof.data.claimed));
           world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
         }
-        applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0)); // restore avatar look
+        applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0)); grantDaily(player); // restore avatar look
       } catch {}
       if (mode === 'signup') {
         // Signup bonus: 1000 coins. TEMPORARY placeholder — to be replaced by an
@@ -1805,7 +1819,7 @@ startServer(world => {
     try {
       await fetch(`${CUBIT_BACKEND}/api/profile`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP, xp: xp.get(player) ?? 0, stats: stats.get(player) ?? {}, claimed: [...(claimed.get(player) ?? [])], cosmetic: cosmeticOf.get(player) ?? { hair: 0 } } }),
+        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP, xp: xp.get(player) ?? 0, daily: lastDaily.get(player) ?? 0, stats: stats.get(player) ?? {}, claimed: [...(claimed.get(player) ?? [])], cosmetic: cosmeticOf.get(player) ?? { hair: 0 } } }),
       });
     } catch {}
   }
