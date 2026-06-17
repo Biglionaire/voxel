@@ -94,6 +94,7 @@
         <input id="d-amt" type="number" min="0" step="0.000001" placeholder="USDC to deposit" />
         <button id="w-deposit" type="button">Deposit</button>
       </div>
+      <button class="xbtn" id="w-faucet" type="button" style="margin-top:10px">🚰 Get test USDC (devnet faucet)</button>
       <div class="msg" id="w-msg"></div>
       <button class="go bigplay" id="w-play" type="button" style="margin-top:6px">▶ Enter Game</button>
     </div>
@@ -168,6 +169,17 @@
       btn.disabled = false;
     });
     document.getElementById('w-play').addEventListener('click', () => location.href = '/play?token=' + encodeURIComponent(window.cubitToken));
+    document.getElementById('w-faucet').addEventListener('click', async () => {
+      const btn = document.getElementById('w-faucet'), m = document.getElementById('w-msg');
+      btn.disabled = true; m.textContent = 'Requesting test USDC…';
+      try {
+        const r = await (await fetch('/api/cubit/faucet', { method: 'POST', headers: { Authorization: 'Bearer ' + window.cubitToken } })).json();
+        if (!r.ok) throw new Error(r.error || 'failed');
+        m.innerHTML = '✅ Sent ' + r.amount + ' ' + r.symbol + ' to your wallet! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">tx</a>';
+        await loadWallet();
+      } catch (e) { m.textContent = '❌ ' + (e.message || e); }
+      btn.disabled = false;
+    });
     document.getElementById('ca').addEventListener('click', () => {
       try { navigator.clipboard.writeText('9oA6TFkdpaStyWJqUkX5dCMQAktSM16rjLtS7Vgaory'); } catch (e) {}
       const c = document.getElementById('ca-copy'); c.textContent = '✅'; setTimeout(() => c.textContent = '📋', 1200);

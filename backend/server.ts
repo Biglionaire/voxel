@@ -67,6 +67,7 @@ db.run(`CREATE TABLE IF NOT EXISTS deposits (
   ts INTEGER NOT NULL
 )`);
 db.run(`CREATE TABLE IF NOT EXISTS withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, tokens REAL NOT NULL, ts INTEGER NOT NULL)`);
+db.run(`CREATE TABLE IF NOT EXISTS faucet_claims (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, ts INTEGER NOT NULL)`);
 
 /* ---------------- Reward economy (gold <-> payout token) ---------------- */
 const REWARD_SYMBOL = process.env.REWARD_SYMBOL ?? 'USDC';
@@ -226,6 +227,28 @@ Bun.serve({
       pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + gold;
       setProfileData(username, pd);
       return json({ ok: true, credited: gold });
+    }
+
+    // Faucet: send a small amount of the (devnet test) reward token to the connected wallet.
+    // Disabled on mainnet (real USDC) via FAUCET_ENABLED.
+    if (pathname === '/api/cubit/faucet' && req.method === 'POST') {
+      if (process.env.FAUCET_ENABLED !== 'true') return json({ error: 'Faucet is disabled.' }, 403);
+      const username = verifyToken(bearer(req));
+      if (!username) return json({ error: 'Unauthorized.' }, 401);
+      if (!isWalletName(username)) return json({ error: 'Connect a Solana wallet first.' }, 400);
+      if (!solanaEnabled) return json({ error: 'Not configured.' }, 503);
+      const cooldownMs = Number(process.env.FAUCET_COOLDOWN_H ?? 12) * 3600000;
+      const last = db.query('SELECT ts FROM faucet_claims WHERE username = ? ORDER BY ts DESC LIMIT 1').get(username) as any;
+      if (last && Date.now() - last.ts < cooldownMs) {
+        const h = Math.ceil((cooldownMs - (Date.now() - last.ts)) / 3600000);
+        return json({ error: `Already claimed — try again in ~${h}h.` }, 429);
+      }
+      const amount = Number(process.env.FAUCET_AMOUNT ?? 5);
+      try {
+        const sig = await sendCubit(username, amount);
+        db.run('INSERT INTO faucet_claims (username, ts) VALUES (?, ?)', [username, Date.now()]);
+        return json({ ok: true, sig, amount, symbol: REWARD_SYMBOL });
+      } catch (e: any) { return json({ error: String(e?.message || e) }, 500); }
     }
 
     // Internal: the game sends the reward token after it has already debited `gold` in-game.
