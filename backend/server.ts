@@ -315,6 +315,12 @@ Bun.serve({
       return new Response(Bun.file(`${import.meta.dir}/public/index.html`), { headers: { 'Content-Type': 'text/html' } });
     }
 
+    // --- security.txt (RFC 9116) — a legitimacy/trust signal ---
+    if (pathname === '/.well-known/security.txt' || pathname === '/security.txt') {
+      const body = `Contact: https://x.com/cubitcash\nExpires: 2027-01-01T00:00:00.000Z\nPreferred-Languages: en, id\n# CUBIT is a voxel survival game with optional Solana wallet rewards. We never request seed phrases.\n`;
+      return new Response(body, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    }
+
     // --- Static assets from public/ (bg.png, favicon, …) ---
     if (/^\/[\w.-]+\.(png|jpe?g|webp|gif|svg|ico|css|js)$/.test(pathname)) {
       const f = Bun.file(`${import.meta.dir}/public${pathname}`);
