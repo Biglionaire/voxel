@@ -1546,15 +1546,15 @@ startServer(world => {
     if (goldOf(player) < amt) { world.chatManager.sendPlayerMessage(player, `Not enough gold (have ${goldOf(player)}).`, 'FF8844'); return; }
     const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - amt); if ((inv.get('gold-ingot') ?? 0) <= 0) inv.delete('gold-ingot'); sendHud(player);
     await saveProfile(player);
-    toast(player, `💠 Sending ${amt} $CUBIT to your wallet…`);
+    toast(player, `💠 Cashing out ${amt} gold…`);
     try {
       const res = await fetch(`${process.env.CUBIT_BACKEND_URL ?? 'http://localhost:3001'}/api/cubit/send`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.CUBIT_INTERNAL_KEY ?? '' }, body: JSON.stringify({ wallet, amount: amt }),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Internal-Key': process.env.CUBIT_INTERNAL_KEY ?? '' }, body: JSON.stringify({ wallet, gold: amt }),
       });
       const data: any = await res.json();
       if (!data.ok) throw new Error(data.error || 'failed');
-      toast(player, `✅ Cashed out ${amt} $CUBIT!`);
-      world.chatManager.sendPlayerMessage(player, `✅ Cashed out ${amt} gold → ${amt} $CUBIT (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
+      toast(player, `✅ Cashed out ${data.tokens} ${data.symbol}!`);
+      world.chatManager.sendPlayerMessage(player, `✅ Cashed out ${amt} gold → ${data.tokens} ${data.symbol} (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
     } catch (e) {
       addItem(player, 'gold-ingot', amt); // refund on failure
       world.chatManager.sendPlayerMessage(player, `❌ Cash out failed — gold refunded. (${e})`, 'FF5555');

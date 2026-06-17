@@ -8,8 +8,8 @@ import { getOrCreateAssociatedTokenAccount, getAssociatedTokenAddress, getAccoun
 import bs58 from 'bs58';
 
 const RPC = process.env.CUBIT_RPC ?? 'https://api.devnet.solana.com';
-const MINT = process.env.CUBIT_MINT ?? '';
-const DECIMALS = Number(process.env.CUBIT_DECIMALS ?? 9);
+const MINT = process.env.REWARD_MINT ?? process.env.CUBIT_MINT ?? ''; // the payout token (USDC/$CUBIT)
+const DECIMALS = Number(process.env.REWARD_DECIMALS ?? process.env.CUBIT_DECIMALS ?? 9);
 const SECRET = process.env.CUBIT_TREASURY_SECRET ?? '';
 
 const conn = new Connection(RPC, 'confirmed');

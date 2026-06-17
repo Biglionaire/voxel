@@ -84,13 +84,14 @@
     <div class="msg" id="wmsg">Play as guest in-game, or connect your Solana wallet to register.</div>
     <div id="wdash" style="display:none">
       <div class="wrow"><span>🪙 In-game gold</span><b id="w-gold">0</b></div>
-      <div class="wrow"><span>💠 $CUBIT (devnet)</span><b id="w-cubit">0</b></div>
+      <div class="wrow"><span>💵 <span id="w-sym">USDC</span> (devnet)</span><b id="w-cubit">0</b></div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.55);text-align:center;margin:4px 0 8px"><b id="w-rate">100,000</b> gold = 1 USDC</div>
       <div class="wwithdraw">
-        <input id="w-amt" type="number" min="1" placeholder="gold → $CUBIT" />
+        <input id="w-amt" type="number" min="1" placeholder="gold to cash out" />
         <button id="w-withdraw" type="button">Withdraw</button>
       </div>
       <div class="wwithdraw">
-        <input id="d-amt" type="number" min="1" placeholder="$CUBIT → gold" />
+        <input id="d-amt" type="number" min="0" step="0.000001" placeholder="USDC to deposit" />
         <button id="w-deposit" type="button">Deposit</button>
       </div>
       <div class="msg" id="w-msg"></div>
@@ -149,7 +150,9 @@
     async function loadWallet() {
       const b = await (await fetch('/api/cubit/balance', { headers: { Authorization: 'Bearer ' + window.cubitToken } })).json();
       document.getElementById('w-gold').textContent = b.gold ?? 0;
-      document.getElementById('w-cubit').textContent = b.cubit ?? 0;
+      document.getElementById('w-cubit').textContent = b.reward ?? 0;
+      document.getElementById('w-sym').textContent = b.symbol || 'USDC';
+      document.getElementById('w-rate').textContent = (b.rate || 100000).toLocaleString();
     }
     document.getElementById('w-withdraw').addEventListener('click', async () => {
       const btn = document.getElementById('w-withdraw'), amt = parseInt(document.getElementById('w-amt').value, 10);
@@ -159,7 +162,7 @@
       try {
         const r = await (await fetch('/api/cubit/withdraw', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ amount: amt }) })).json();
         if (!r.ok) throw new Error(r.error || 'failed');
-        m.innerHTML = '✅ Withdrew ' + r.withdrawn + ' $CUBIT! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">View tx</a>';
+        m.innerHTML = '✅ Withdrew ' + r.withdrawn + ' ' + (r.symbol || 'USDC') + '! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">View tx</a>';
         await loadWallet();
       } catch (e) { m.textContent = '❌ ' + (e.message || e); }
       btn.disabled = false;

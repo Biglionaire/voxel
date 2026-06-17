@@ -66,6 +66,17 @@ db.run(`CREATE TABLE IF NOT EXISTS deposits (
   amount INTEGER NOT NULL,
   ts INTEGER NOT NULL
 )`);
+db.run(`CREATE TABLE IF NOT EXISTS withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, tokens REAL NOT NULL, ts INTEGER NOT NULL)`);
+
+/* ---------------- Reward economy (gold <-> payout token) ---------------- */
+const REWARD_SYMBOL = process.env.REWARD_SYMBOL ?? 'USDC';
+const REWARD_RATE = Number(process.env.REWARD_RATE ?? 100000);      // gold per 1 reward token
+const REWARD_MIN_GOLD = Number(process.env.REWARD_MIN_GOLD ?? 50000); // min gold per withdraw
+const REWARD_DAILY_CAP = Number(process.env.REWARD_DAILY_CAP ?? 1);  // max reward tokens / 24h / account
+const withdrawnToday = (username: string): number => {
+  const row = db.query('SELECT COALESCE(SUM(tokens),0) AS t FROM withdrawals WHERE username = ? AND ts > ?').get(username, Date.now() - 86400000) as any;
+  return Number(row?.t ?? 0);
+};
 
 /* ---------------- Tokens (HMAC, no deps) ---------------- */
 const b64url = (s: string) => Buffer.from(s).toString('base64url');
@@ -161,36 +172,39 @@ Bun.serve({
 
     // --- $CUBIT on-chain (Solana, custodial treasury) ---
     if (pathname === '/api/cubit/info') {
-      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', rate: 1, decimals: Number(process.env.CUBIT_DECIMALS ?? 9) });
+      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
     }
     if (pathname === '/api/cubit/balance') {
       const username = verifyToken(bearer(req));
       if (!username) return json({ error: 'Unauthorized.' }, 401);
       const pd = getProfileData(username);
       const gold = pd?.inventory?.['gold-ingot'] ?? 0;
-      const cubit = isWalletName(username) ? await getCubitBalance(username) : 0;
-      return json({ wallet: isWalletName(username) ? username : null, gold, cubit });
+      const reward = isWalletName(username) ? await getCubitBalance(username) : 0;
+      return json({ wallet: isWalletName(username) ? username : null, gold, reward, symbol: REWARD_SYMBOL, rate: REWARD_RATE, dailyLeft: Math.max(0, REWARD_DAILY_CAP - withdrawnToday(username)) });
     }
-    // Withdraw: burn in-game gold → send $CUBIT from the treasury to the player's wallet (1:1).
+    // Withdraw: burn `amount` gold → send (amount/RATE) reward token to the player's wallet.
     if (pathname === '/api/cubit/withdraw' && req.method === 'POST') {
       const username = verifyToken(bearer(req));
       if (!username) return json({ error: 'Unauthorized.' }, 401);
       if (!isWalletName(username)) return json({ error: 'Connect with a Solana wallet to withdraw.' }, 400);
-      if (!solanaEnabled) return json({ error: '$CUBIT is not configured yet.' }, 503);
+      if (!solanaEnabled) return json({ error: 'Rewards not configured yet.' }, 503);
       const { amount } = await req.json().catch(() => ({}));
-      const amt = Math.floor(Number(amount));
-      if (!(amt > 0)) return json({ error: 'Enter a valid amount.' }, 400);
-      const pd = getProfileData(username);
-      if (!pd.inventory) pd.inventory = {};
+      const goldAmt = Math.floor(Number(amount));
+      if (!(goldAmt > 0)) return json({ error: 'Enter a valid gold amount.' }, 400);
+      if (goldAmt < REWARD_MIN_GOLD) return json({ error: `Minimum withdraw is ${REWARD_MIN_GOLD.toLocaleString()} gold.` }, 400);
+      const tokens = goldAmt / REWARD_RATE;
+      if (withdrawnToday(username) + tokens > REWARD_DAILY_CAP) return json({ error: `Daily cap is ${REWARD_DAILY_CAP} ${REWARD_SYMBOL} per account.` }, 400);
+      const pd = getProfileData(username); if (!pd.inventory) pd.inventory = {};
       const gold = pd.inventory['gold-ingot'] ?? 0;
-      if (gold < amt) return json({ error: `Not enough gold (you have ${gold}).` }, 400);
-      pd.inventory['gold-ingot'] = gold - amt; if (pd.inventory['gold-ingot'] <= 0) delete pd.inventory['gold-ingot'];
+      if (gold < goldAmt) return json({ error: `Not enough gold (you have ${gold}).` }, 400);
+      pd.inventory['gold-ingot'] = gold - goldAmt; if (pd.inventory['gold-ingot'] <= 0) delete pd.inventory['gold-ingot'];
       setProfileData(username, pd); // debit first
       try {
-        const sig = await sendCubit(username, amt);
-        return json({ ok: true, sig, withdrawn: amt });
+        const sig = await sendCubit(username, tokens);
+        db.run('INSERT INTO withdrawals (username, tokens, ts) VALUES (?, ?, ?)', [username, tokens, Date.now()]);
+        return json({ ok: true, sig, withdrawn: tokens, symbol: REWARD_SYMBOL });
       } catch (e: any) {
-        pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + amt; setProfileData(username, pd); // refund
+        pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + goldAmt; setProfileData(username, pd); // refund
         return json({ error: 'Transfer failed: ' + (e?.message || e) }, 500);
       }
     }
@@ -204,9 +218,9 @@ Bun.serve({
       const { sig } = await req.json().catch(() => ({}));
       if (!sig || typeof sig !== 'string') return json({ error: 'Missing transaction signature.' }, 400);
       if (db.query('SELECT 1 FROM deposits WHERE sig = ?').get(sig)) return json({ error: 'That deposit was already credited.' }, 400);
-      const amount = await verifyDeposit(sig, username);
-      if (!(amount > 0)) return json({ error: 'No valid $CUBIT deposit to the treasury found in that transaction.' }, 400);
-      const gold = Math.floor(amount);
+      const amount = await verifyDeposit(sig, username); // reward tokens received by treasury
+      if (!(amount > 0)) return json({ error: `No valid ${REWARD_SYMBOL} deposit to the treasury found in that transaction.` }, 400);
+      const gold = Math.floor(amount * REWARD_RATE);
       db.run('INSERT INTO deposits (sig, username, amount, ts) VALUES (?, ?, ?, ?)', [sig, username, gold, Date.now()]);
       const pd = getProfileData(username); if (!pd.inventory) pd.inventory = {};
       pd.inventory['gold-ingot'] = (pd.inventory['gold-ingot'] ?? 0) + gold;
@@ -214,15 +228,22 @@ Bun.serve({
       return json({ ok: true, credited: gold });
     }
 
-    // Internal: the game server sends $CUBIT after it has already debited in-game gold.
+    // Internal: the game sends the reward token after it has already debited `gold` in-game.
     if (pathname === '/api/cubit/send' && req.method === 'POST') {
       const key = req.headers.get('x-internal-key');
       if (!process.env.CUBIT_INTERNAL_KEY || key !== process.env.CUBIT_INTERNAL_KEY) return json({ error: 'Forbidden.' }, 403);
-      if (!solanaEnabled) return json({ error: '$CUBIT not configured.' }, 503);
-      const { wallet, amount } = await req.json().catch(() => ({}));
-      if (!isWalletName(wallet) || !(Number(amount) > 0)) return json({ error: 'Bad args.' }, 400);
-      try { return json({ ok: true, sig: await sendCubit(wallet, Number(amount)) }); }
-      catch (e: any) { return json({ error: String(e?.message || e) }, 500); }
+      if (!solanaEnabled) return json({ error: 'Rewards not configured.' }, 503);
+      const { wallet, gold } = await req.json().catch(() => ({}));
+      const g = Math.floor(Number(gold));
+      if (!isWalletName(wallet) || !(g > 0)) return json({ error: 'Bad args.' }, 400);
+      if (g < REWARD_MIN_GOLD) return json({ error: `min ${REWARD_MIN_GOLD} gold`, code: 'min' }, 400);
+      const tokens = g / REWARD_RATE;
+      if (withdrawnToday(wallet) + tokens > REWARD_DAILY_CAP) return json({ error: `daily cap ${REWARD_DAILY_CAP} ${REWARD_SYMBOL}`, code: 'cap' }, 400);
+      try {
+        const sig = await sendCubit(wallet, tokens);
+        db.run('INSERT INTO withdrawals (username, tokens, ts) VALUES (?, ?, ?)', [wallet, tokens, Date.now()]);
+        return json({ ok: true, sig, tokens, symbol: REWARD_SYMBOL });
+      } catch (e: any) { return json({ error: String(e?.message || e) }, 500); }
     }
 
     // --- Who am I (token check) ---
