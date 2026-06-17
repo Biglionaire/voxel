@@ -1568,6 +1568,16 @@ startServer(world => {
   }
   world.chatManager.registerCommand('/cashout', (player, args) => doCashout(player, Number(args[0] ?? '0')));
   world.chatManager.registerCommand('/wallet', player => { if (menuOpen.get(player) === 'wallet') closeMenu(player); else openMenu(player, 'wallet'); });
+  world.chatManager.registerCommand('/top', async player => {
+    try {
+      const data: any = await (await fetch(`${process.env.CUBIT_BACKEND_URL ?? 'http://localhost:3001'}/api/leaderboard`)).json();
+      world.chatManager.sendPlayerMessage(player, '🏆 Top Players (by level):', 'FFD700');
+      (data.top || []).forEach((r: any, i: number) => {
+        const name = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.username) ? r.username.slice(0, 4) + '…' + r.username.slice(-4) : r.username;
+        world.chatManager.sendPlayerMessage(player, `${i + 1}. ${name} — Lv ${levelFromXp(Number(r.xp))} · ${r.gold}🪙`, i === 0 ? 'FFD700' : 'CCCCCC');
+      });
+    } catch { world.chatManager.sendPlayerMessage(player, 'Leaderboard unavailable.', 'FF8844'); }
+  });
   world.chatManager.registerCommand('/hair', (player, args) => {
     const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
     if (!pe) return;

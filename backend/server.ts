@@ -172,6 +172,12 @@ Bun.serve({
     }
 
     // --- $CUBIT on-chain (Solana, custodial treasury) ---
+    // Public leaderboard — top players by XP.
+    if (pathname === '/api/leaderboard') {
+      const rows = db.query(`SELECT username, COALESCE(json_extract(data,'$.xp'),0) AS xp, COALESCE(json_extract(data,'$.inventory."gold-ingot"'),0) AS gold FROM profiles ORDER BY xp DESC LIMIT 10`).all();
+      return json({ top: rows });
+    }
+
     if (pathname === '/api/cubit/info') {
       return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
     }
