@@ -11,12 +11,23 @@
 # Apex is the front door: landing page at /, API at /api/*, /play redirect.
 cubit.cash, www.cubit.cash {
 	encode zstd gzip
+	header {
+		# Trust/legitimacy signals (safe — don't affect framing or scripts)
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000"
+	}
 	reverse_proxy 127.0.0.1:3001
 }
 
 # ── Static game client (hytopia-source build) ────────────────────────────────
 play.cubit.cash {
 	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000"
+	}
 	root * /opt/cubit/client-dist
 	try_files {path} /index.html
 	file_server
