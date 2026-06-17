@@ -161,7 +161,7 @@ Bun.serve({
 
     // --- $CUBIT on-chain (Solana, custodial treasury) ---
     if (pathname === '/api/cubit/info') {
-      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', rate: 1 });
+      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', rate: 1, decimals: Number(process.env.CUBIT_DECIMALS ?? 9) });
     }
     if (pathname === '/api/cubit/balance') {
       const username = verifyToken(bearer(req));

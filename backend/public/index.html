@@ -86,8 +86,12 @@
       <div class="wrow"><span>🪙 In-game gold</span><b id="w-gold">0</b></div>
       <div class="wrow"><span>💠 $CUBIT (devnet)</span><b id="w-cubit">0</b></div>
       <div class="wwithdraw">
-        <input id="w-amt" type="number" min="1" placeholder="Amount of gold → $CUBIT" />
+        <input id="w-amt" type="number" min="1" placeholder="gold → $CUBIT" />
         <button id="w-withdraw" type="button">Withdraw</button>
+      </div>
+      <div class="wwithdraw">
+        <input id="d-amt" type="number" min="1" placeholder="$CUBIT → gold" />
+        <button id="w-deposit" type="button">Deposit</button>
       </div>
       <div class="msg" id="w-msg"></div>
       <button class="go bigplay" id="w-play" type="button" style="margin-top:6px">▶ Enter Game</button>
@@ -165,6 +169,39 @@
       try { navigator.clipboard.writeText('9oA6TFkdpaStyWJqUkX5dCMQAktSM16rjLtS7Vgaory'); } catch (e) {}
       const c = document.getElementById('ca-copy'); c.textContent = '✅'; setTimeout(() => c.textContent = '📋', 1200);
     });
+    document.getElementById('w-deposit').addEventListener('click', async () => {
+      const btn = document.getElementById('w-deposit'), amt = parseInt(document.getElementById('d-amt').value, 10), m = document.getElementById('w-msg');
+      if (!(amt > 0)) { m.textContent = 'Enter an amount.'; return; }
+      if (!window.cubitDeposit) { m.textContent = 'Deposit module still loading…'; return; }
+      btn.disabled = true; m.textContent = 'Approve the transfer in your wallet…';
+      try {
+        const r = await window.cubitDeposit(amt);
+        if (!r.ok) throw new Error(r.error || 'failed');
+        m.textContent = '✅ Deposited ' + amt + ' $CUBIT → +' + r.credited + ' gold!';
+        await loadWallet();
+      } catch (e) { m.textContent = '❌ ' + (e.message || e); }
+      btn.disabled = false;
+    });
+  </script>
+  <script type="module">
+    // Phantom deposit: build an SPL transfer of $CUBIT to the treasury, sign+send, then claim gold.
+    import { Connection, PublicKey, Transaction, clusterApiUrl } from 'https://esm.sh/@solana/web3.js@1.95.3';
+    import { getAssociatedTokenAddress, createTransferInstruction } from 'https://esm.sh/@solana/spl-token@0.4.9';
+    window.cubitDeposit = async (amount) => {
+      const info = await (await fetch('/api/cubit/info')).json();
+      if (!info.enabled) throw new Error('$CUBIT not configured');
+      const conn = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
+      const user = new PublicKey(window.solana.publicKey.toString());
+      const fromAta = await getAssociatedTokenAddress(mint, user);
+      const toAta = await getAssociatedTokenAddress(mint, treasury);
+      const tx = new Transaction().add(createTransferInstruction(fromAta, toAta, user, BigInt(Math.round(amount * 10 ** info.decimals))));
+      tx.feePayer = user;
+      tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+      const { signature } = await window.solana.signAndSendTransaction(tx);
+      await conn.confirmTransaction(signature, 'confirmed');
+      return await (await fetch('/api/cubit/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ sig: signature }) })).json();
+    };
   </script>
 </body>
 </html>
