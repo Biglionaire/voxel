@@ -1658,22 +1658,26 @@ startServer(world => {
     items: { cobblestone: 100, 'oak-log': 200, stone: 200, bricks: 300, lantern: 300, fence: 100, 'lamp-post': 400, torch: 100, bench: 300, chest: 400, barrel: 200, bookshelf: 500 },
     vehicles: { paddle: 10000, kayak: 12000, boat: 15000, pickup: 20000, jetski: 25000, 'school-bus': 40000 },
     tools: { 'axe-wood': 5000, 'pickaxe-wood': 5000, 'axe-stone': 10000, 'pickaxe-stone': 10000, 'axe-iron': 20000, 'pickaxe-iron': 20000, 'axe-gold': 40000, 'pickaxe-gold': 40000, 'axe-diamond': 80000, 'pickaxe-diamond': 80000 },
-    fishing: { bait: 100, 'fishing-rod': 5000, 'fishing-rod-2': 15000, 'fishing-rod-3': 40000 },
+    fishing: { bait: 25, 'fishing-rod': 5000, 'fishing-rod-2': 15000, 'fishing-rod-3': 40000 },
     health: { 'golden-apple': 800, bread: 200, cookie: 100, melon: 200, 'cod-cooked': 500, 'salmon-cooked': 800 },
   };
   const SHOP_BUY: Record<string, number> = Object.assign({}, ...Object.values(SHOP_CATEGORIES));
   // Sell: every fish + rare + staple item.
+  // Sell ≈ ×25 of the original balance (¼ of the buy-side ×100 scale) so earning lands
+  // ~$3/hr and the $5 daily cap is a ~1.5h grind, not a 20-minute one.
   const SHOP_SELL: Record<string, number> = {
-    'cod-raw': 200, 'salmon-raw': 300, 'cod-cooked': 400, 'salmon-cooked': 600,
-    pufferfish: 700, clownfish: 600, catfish: 500, parrotfish: 700, lionfish: 900, sailfish: 1100, swordfish: 1300, anglerfish: 1200,
-    bone: 100, book: 100, compass: 200, clock: 200, 'gold-nugget': 100, 'gold-ingot': 0, 'iron-ingot': 300, 'iron-nugget': 100,
-    feather: 100, 'creepy-eye': 200, 'ink-bottle': 200, paper: 100, milk: 200, firework: 300, 'name-tag': 400, melon: 100,
+    'cod-raw': 50, 'salmon-raw': 75, 'cod-cooked': 100, 'salmon-cooked': 150,
+    pufferfish: 175, clownfish: 150, catfish: 125, parrotfish: 175, lionfish: 225, sailfish: 275, swordfish: 325, anglerfish: 300,
+    bone: 25, book: 25, compass: 50, clock: 50, 'gold-nugget': 25, 'gold-ingot': 0, 'iron-ingot': 75, 'iron-nugget': 25,
+    feather: 25, 'creepy-eye': 50, 'ink-bottle': 50, paper: 25, milk: 50, firework: 75, 'name-tag': 100, melon: 25,
     // mined blocks + foraged collectibles are all sellable too
-    cobblestone: 100, stone: 100, bricks: 200, 'oak-log': 100, sand: 100, 'grass-block': 100, 'coal-ore': 300, 'iron-ore': 400, 'gold-ore': 600, diamond: 1200,
-    carrot: 100, 'golden-apple': 400, bread: 100, cookie: 100, plank: 100, stick: 100,
+    cobblestone: 25, stone: 25, 'oak-log': 25, sand: 25, 'grass-block': 25, 'coal-ore': 75, 'iron-ore': 100, 'gold-ore': 150, diamond: 300,
+    carrot: 25, 'golden-apple': 100, bread: 25, cookie: 25,
+    // crafting intermediates — priced below their inputs so craft→sell can't mint gold
+    plank: 5, stick: 2, bricks: 20,
     // tools (rarity-priced) + crafted goods are sellable
-    'axe-wood': 400, 'pickaxe-wood': 400, 'axe-stone': 1000, 'pickaxe-stone': 1000, 'axe-iron': 2500, 'pickaxe-iron': 2500,
-    'axe-gold': 5500, 'pickaxe-gold': 5500, 'axe-diamond': 12000, 'pickaxe-diamond': 12000,
+    'axe-wood': 100, 'pickaxe-wood': 100, 'axe-stone': 250, 'pickaxe-stone': 250, 'axe-iron': 625, 'pickaxe-iron': 625,
+    'axe-gold': 1375, 'pickaxe-gold': 1375, 'axe-diamond': 3000, 'pickaxe-diamond': 3000,
   };
   delete (SHOP_SELL as any)['gold-ingot']; // never sell the currency itself
   const playerBuilding = new Map<any, any>();
