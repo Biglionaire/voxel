@@ -1171,6 +1171,9 @@ startServer(world => {
     // Open/close the marketplace shop (R) — works anywhere.
     if (input.r && !prev.r) { if (shopOpen.has(player)) closeShop(player); else openShop(player); }
 
+    // Open/close the crafting Workbench (V) — works anywhere.
+    if (input.v && !prev.v) { if (menuOpen.get(player) === 'workbench') closeMenu(player); else openMenu(player, 'workbench'); }
+
     // Fishing (X) — need a rod (any level) + bait, near water. Higher rod = faster + more rares.
     if (input.x && !prev.x && !fishing.has(player)) {
       const inv = getInv(player);
@@ -1528,18 +1531,61 @@ startServer(world => {
   }
 
   /* --- Clinic / Tavern menu pages ---------------------------------- */
-  const menuOpen = new Map<any, string>(); // player -> 'clinic' | 'tavern'
+  /* --- Crafting: a Workbench (V key) turns mined/chopped materials into planks,
+   * sticks, ingots, bricks and tiered tools. Each craft takes 3s / 5s / 10s. */
+  const CRAFT_RECIPES: Record<string, { in: Record<string, number>; out: number; time: number; label: string }> = {
+    plank: { in: { 'oak-log': 1 }, out: 4, time: 3000, label: '🟫 Planks ×4' },
+    stick: { in: { plank: 2 }, out: 4, time: 3000, label: '🪵 Sticks ×4' },
+    bricks: { in: { stone: 4 }, out: 4, time: 3000, label: '🧱 Bricks ×4' },
+    'iron-ingot': { in: { 'iron-ore': 2 }, out: 1, time: 5000, label: '⚙️ Iron Ingot (smelt)' },
+    'axe-wood': { in: { plank: 3, stick: 2 }, out: 1, time: 3000, label: '🪓 Wood Axe (Common)' },
+    'pickaxe-wood': { in: { plank: 3, stick: 2 }, out: 1, time: 3000, label: '⛏️ Wood Pickaxe (Common)' },
+    'axe-stone': { in: { stone: 3, stick: 2 }, out: 1, time: 5000, label: '🪓 Stone Axe (Uncommon)' },
+    'pickaxe-stone': { in: { stone: 3, stick: 2 }, out: 1, time: 5000, label: '⛏️ Stone Pickaxe (Uncommon)' },
+    'axe-iron': { in: { 'iron-ingot': 3, stick: 2 }, out: 1, time: 10000, label: '🪓 Iron Axe (Rare)' },
+    'pickaxe-iron': { in: { 'iron-ingot': 3, stick: 2 }, out: 1, time: 10000, label: '⛏️ Iron Pickaxe (Rare)' },
+  };
+  const crafting = new Set<any>(); // players mid-craft (one at a time)
+  function craftItem(player: any, key: string) {
+    const r = CRAFT_RECIPES[key]; if (!r) return;
+    if (crafting.has(player)) { toast(player, '⏳ Already crafting…'); return; }
+    const inv = getInv(player);
+    for (const [m, q] of Object.entries(r.in)) if ((inv.get(m) ?? 0) < q) { toast(player, `❌ Need ${q} ${m.replace(/-/g, ' ')}`); return; }
+    for (const [m, q] of Object.entries(r.in)) { inv.set(m, inv.get(m)! - q); if (inv.get(m)! <= 0) inv.delete(m); }
+    sendHud(player); crafting.add(player);
+    toast(player, `🔨 Crafting… ${(r.time / 1000).toFixed(0)}s`);
+    if (menuOpen.get(player) === 'workbench') sendMenu(player, 'workbench');
+    setTimeout(() => {
+      crafting.delete(player);
+      addItem(player, key, r.out);
+      toast(player, `✅ Crafted ${r.label}`);
+      try { new Audio({ uri: 'audio/sfx/ui/inventory-place-item.mp3', volume: 0.5 }).play(world); } catch {}
+      if (menuOpen.get(player) === 'workbench') sendMenu(player, 'workbench');
+    }, r.time);
+  }
+
+  const menuOpen = new Map<any, string>(); // player -> 'clinic' | 'tavern' | 'workbench'
   function sendMenu(player: any, kind: string) {
-    const buttons = kind === 'clinic'
-      ? [{ label: '❤️ Heal to full (free)', action: 'heal' }, { label: '🩹 Buy a Golden Apple (8🪙)', action: 'buy-apple' }]
-      : [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: '🍺 Order a meal (+40 HP, 3🪙)', action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }];
-    player.ui.sendData({ type: 'menu', open: true, kind, title: kind === 'clinic' ? '🏥 Clinic' : '🍺 Tavern', gold: goldOf(player), hp: hp.get(player) ?? MAX_HP, buttons });
+    let title: string, buttons: { label: string; action: string }[];
+    if (kind === 'clinic') { title = '🏥 Clinic'; buttons = [{ label: '❤️ Heal to full (free)', action: 'heal' }, { label: '🩹 Buy a Golden Apple (8🪙)', action: 'buy-apple' }]; }
+    else if (kind === 'workbench') {
+      title = '🔨 Workbench — craft';
+      const inv = getInv(player);
+      buttons = Object.entries(CRAFT_RECIPES).map(([k, r]) => {
+        const cost = Object.entries(r.in).map(([m, q]) => `${q} ${m.replace(/-/g, ' ')}`).join(' + ');
+        const can = Object.entries(r.in).every(([m, q]) => (inv.get(m) ?? 0) >= q);
+        return { label: `${r.label} — ${cost}${can ? '' : ' ❌'}`, action: `craft:${k}` };
+      });
+    }
+    else { title = '🍺 Tavern'; buttons = [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: '🍺 Order a meal (+40 HP, 3🪙)', action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }]; }
+    player.ui.sendData({ type: 'menu', open: true, kind, title, gold: goldOf(player), hp: hp.get(player) ?? MAX_HP, buttons });
   }
   function openMenu(player: any, kind: string) { menuOpen.set(player, kind); try { player.ui.lockPointer(false); } catch {} sendMenu(player, kind); }
   function closeMenu(player: any) { if (!menuOpen.has(player)) return; menuOpen.delete(player); try { player.ui.sendData({ type: 'menu', open: false }); player.ui.lockPointer(true); } catch {} }
   function handleMenuAction(player: any, action: string) {
     const kind = menuOpen.get(player);
     if (action === 'close') { closeMenu(player); return; }
+    if (action.startsWith('craft:')) { craftItem(player, action.slice(6)); return; }
     if (action === 'heal' || action === 'rest') { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '❤️ Fully healed.', '66FF66'); }
     else if (action === 'buy-apple') { world.chatManager.sendPlayerMessage(player, buyItem(player, 'golden-apple'), '88FF88'); }
     else if (action === 'meal') { if (goldOf(player) >= 3) { const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - 3); hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '🍺 Enjoyed a hearty meal! (+HP)', '66FF66'); } else world.chatManager.sendPlayerMessage(player, 'Need 3 🪙.', 'FF8844'); }
@@ -1586,7 +1632,7 @@ startServer(world => {
         playerBuilding.set(player, b ?? null);
         if (b?.type === 'clinic') openMenu(player, 'clinic');
         else if (b?.type === 'tavern') openMenu(player, 'tavern');
-        else if (menuOpen.has(player)) closeMenu(player);
+        else if (menuOpen.has(player) && menuOpen.get(player) !== 'workbench') closeMenu(player);
       }
     }
   }, 1000);
