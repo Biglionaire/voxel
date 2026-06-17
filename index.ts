@@ -141,6 +141,7 @@ const ITEM_EMOJI: Record<string, string> = {
   'lamp-post': '💡', bench: '🪑', barrel: '🛢️', torch: '🔥', bookshelf: '📚', crate: '📦',
   // fishing
   'fishing-rod': '🎣', 'fishing-rod-2': '🎣', 'fishing-rod-3': '🎏', bait: '🪱', pickup: '🚗',
+  'school-bus': '🚌', jetski: '🚤', boat: '⛵', kayak: '🛶', paddle: '🛶',
   'cod-raw': '🐟', 'cod-cooked': '🍤', 'salmon-raw': '🐠', 'salmon-cooked': '🍣',
   pufferfish: '🐡', clownfish: '🐠', catfish: '🐟', parrotfish: '🐠', lionfish: '🐟', sailfish: '🐟', swordfish: '🗡️', anglerfish: '🎏',
 };
@@ -773,6 +774,14 @@ startServer(world => {
   }
 
   const pickupModel = () => `models/vehicles/${pick(['pickup-red', 'pickup-green', 'pickup-yellow', 'pickup-purple'])}.gltf`;
+  const VEHICLE_SPEC: Record<string, { model: string; kind: 'land' | 'water'; emoji: string }> = {
+    pickup: { model: 'pickup-red', kind: 'land', emoji: '🛻' },
+    'school-bus': { model: 'school-bus', kind: 'land', emoji: '🚌' },
+    jetski: { model: 'jetski', kind: 'water', emoji: '🚤' },
+    boat: { model: 'boat', kind: 'water', emoji: '⛵' },
+    kayak: { model: 'kayak', kind: 'water', emoji: '🛶' },
+    paddle: { model: 'paddle', kind: 'water', emoji: '🛶' },
+  };
   // No vehicles are placed in the world — players BUY them at the marketplace,
   // which spawns the vehicle right next to them (see buyItem).
   console.log('[world] vehicles: 0 (buy at marketplace)');
@@ -1385,7 +1394,7 @@ startServer(world => {
   // Buy stock split into marketplace categories (tabs).
   const SHOP_CATEGORIES: Record<string, Record<string, number>> = {
     items: { cobblestone: 1, 'oak-log': 2, stone: 2, bricks: 3, lantern: 3, fence: 1, 'lamp-post': 4, torch: 1, bench: 3, chest: 4, barrel: 2, bookshelf: 5 },
-    vehicles: { pickup: 50 },
+    vehicles: { pickup: 50, 'school-bus': 140, jetski: 80, boat: 60, kayak: 35, paddle: 30 },
     fishing: { bait: 1, 'fishing-rod': 15, 'fishing-rod-2': 45, 'fishing-rod-3': 120 },
     health: { 'golden-apple': 8, bread: 2, cookie: 1, melon: 2, 'cod-cooked': 5, 'salmon-cooked': 8 },
   };
@@ -1396,6 +1405,9 @@ startServer(world => {
     pufferfish: 7, clownfish: 6, catfish: 5, parrotfish: 7, lionfish: 9, sailfish: 11, swordfish: 13, anglerfish: 12,
     bone: 1, book: 1, compass: 2, clock: 2, 'gold-nugget': 1, 'gold-ingot': 0, 'iron-ingot': 3, 'iron-nugget': 1,
     feather: 1, 'creepy-eye': 2, 'ink-bottle': 2, paper: 1, milk: 2, firework: 3, 'name-tag': 4, melon: 1,
+    // mined blocks + foraged collectibles are all sellable too
+    cobblestone: 1, stone: 1, bricks: 2, 'oak-log': 1, sand: 1, 'grass-block': 1, 'coal-ore': 3, 'iron-ore': 4, 'gold-ore': 6,
+    carrot: 1, 'golden-apple': 4, bread: 1, cookie: 1,
   };
   delete (SHOP_SELL as any)['gold-ingot']; // never sell the currency itself
   const playerBuilding = new Map<any, any>();
@@ -1420,11 +1432,15 @@ startServer(world => {
     inv.set('gold-ingot', goldOf(player) - price);
     if ((inv.get('gold-ingot') ?? 0) <= 0) inv.delete('gold-ingot');
     new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.5 }).play(world);
-    if (item === 'pickup') { // spawn the vehicle beside the buyer instead of inventory
+    if (VEHICLE_SPEC[item]) { // spawn the vehicle beside the buyer instead of inventory
+      const spec = VEHICLE_SPEC[item];
       const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
-      if (pe) spawnVehicle(pickupModel(), 'land', Math.round(pe.position.x) + 2, Math.round(pe.position.z));
+      if (pe) {
+        const model = item === 'pickup' ? pickupModel() : `models/vehicles/${spec.model}.gltf`;
+        spawnVehicle(model, spec.kind, Math.round(pe.position.x) + 2, Math.round(pe.position.z));
+      }
       closeShop(player);
-      return `Bought a 🚗 pickup — parked next to you! Press E to drive.`;
+      return `Bought a ${spec.emoji} ${item.replace('-', ' ')} — parked next to you! ${spec.kind === 'water' ? 'Drive it on water · ' : ''}Press E to drive.`;
     }
     addItem(player, item, 1);
     return `Bought ${item} (−${price} 🪙)`;
