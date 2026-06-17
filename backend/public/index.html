@@ -84,7 +84,7 @@
     <div class="msg" id="wmsg">Play as guest in-game, or connect your Solana wallet to register.</div>
     <div id="wdash" style="display:none">
       <div class="wrow"><span>🪙 In-game gold</span><b id="w-gold">0</b></div>
-      <div class="wrow"><span>💵 <span id="w-sym">USDC</span> (devnet)</span><b id="w-cubit">0</b></div>
+      <div class="wrow"><span>💵 <span id="w-sym">USDC</span><span id="w-net"> (devnet)</span></span><b id="w-cubit">0</b></div>
       <div style="font-size:11px;color:rgba(255,255,255,0.55);text-align:center;margin:4px 0 8px"><b id="w-rate">100,000</b> gold = 1 USDC</div>
       <div class="wwithdraw">
         <input id="w-amt" type="number" min="1" placeholder="gold to cash out" />
@@ -149,12 +149,20 @@
     });
 
     async function loadWallet() {
-      const b = await (await fetch('/api/cubit/balance', { headers: { Authorization: 'Bearer ' + window.cubitToken } })).json();
+      const [b, info] = await Promise.all([
+        fetch('/api/cubit/balance', { headers: { Authorization: 'Bearer ' + window.cubitToken } }).then(r => r.json()),
+        fetch('/api/cubit/info').then(r => r.json()),
+      ]);
+      window.cubitNet = info.network || 'devnet';
+      const mainnet = window.cubitNet === 'mainnet-beta';
       document.getElementById('w-gold').textContent = b.gold ?? 0;
       document.getElementById('w-cubit').textContent = b.reward ?? 0;
       document.getElementById('w-sym').textContent = b.symbol || 'USDC';
       document.getElementById('w-rate').textContent = (b.rate || 100000).toLocaleString();
+      document.getElementById('w-net').textContent = mainnet ? '' : ' (devnet)';
+      document.getElementById('w-faucet').style.display = info.faucet ? '' : 'none';
     }
+    function solscan(sig) { return 'https://solscan.io/tx/' + sig + (window.cubitNet === 'mainnet-beta' ? '' : '?cluster=devnet'); }
     document.getElementById('w-withdraw').addEventListener('click', async () => {
       const btn = document.getElementById('w-withdraw'), amt = parseInt(document.getElementById('w-amt').value, 10);
       const m = document.getElementById('w-msg');
@@ -163,7 +171,7 @@
       try {
         const r = await (await fetch('/api/cubit/withdraw', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + window.cubitToken }, body: JSON.stringify({ amount: amt }) })).json();
         if (!r.ok) throw new Error(r.error || 'failed');
-        m.innerHTML = '✅ Withdrew ' + r.withdrawn + ' ' + (r.symbol || 'USDC') + '! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">View tx</a>';
+        m.innerHTML = '✅ Withdrew ' + r.withdrawn + ' ' + (r.symbol || 'USDC') + '! <a href="' + solscan(r.sig) + '" target="_blank" style="color:#14F195">View tx</a>';
         await loadWallet();
       } catch (e) { m.textContent = '❌ ' + (e.message || e); }
       btn.disabled = false;
@@ -175,7 +183,7 @@
       try {
         const r = await (await fetch('/api/cubit/faucet', { method: 'POST', headers: { Authorization: 'Bearer ' + window.cubitToken } })).json();
         if (!r.ok) throw new Error(r.error || 'failed');
-        m.innerHTML = '✅ Sent ' + r.amount + ' ' + r.symbol + ' to your wallet! <a href="https://solscan.io/tx/' + r.sig + '?cluster=devnet" target="_blank" style="color:#14F195">tx</a>';
+        m.innerHTML = '✅ Sent ' + r.amount + ' ' + r.symbol + ' to your wallet! <a href="' + solscan(r.sig) + '" target="_blank" style="color:#14F195">tx</a>';
         await loadWallet();
       } catch (e) { m.textContent = '❌ ' + (e.message || e); }
       btn.disabled = false;
@@ -192,7 +200,7 @@
       try {
         const r = await window.cubitDeposit(amt);
         if (!r.ok) throw new Error(r.error || 'failed');
-        m.textContent = '✅ Deposited ' + amt + ' $CUBIT → +' + r.credited + ' gold!';
+        m.textContent = '✅ Deposited ' + amt + ' ' + (document.getElementById('w-sym').textContent || 'USDC') + ' → +' + r.credited + ' gold!';
         await loadWallet();
       } catch (e) { m.textContent = '❌ ' + (e.message || e); }
       btn.disabled = false;
@@ -205,7 +213,7 @@
     window.cubitDeposit = async (amount) => {
       const info = await (await fetch('/api/cubit/info')).json();
       if (!info.enabled) throw new Error('$CUBIT not configured');
-      const conn = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      const conn = new Connection(clusterApiUrl(info.network === 'mainnet-beta' ? 'mainnet-beta' : 'devnet'), 'confirmed');
       const mint = new PublicKey(info.mint), treasury = new PublicKey(info.treasury);
       const user = new PublicKey(window.solana.publicKey.toString());
       const fromAta = await getAssociatedTokenAddress(mint, user);

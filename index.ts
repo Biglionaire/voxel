@@ -1574,7 +1574,7 @@ startServer(world => {
         refreshWallet(player); return;
       }
       toast(player, `✅ Cashed out ${data.tokens} ${data.symbol}!`);
-      world.chatManager.sendPlayerMessage(player, `✅ ${amt} gold → ${data.tokens} ${data.symbol} (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
+      world.chatManager.sendPlayerMessage(player, `✅ ${amt} gold → ${data.tokens} ${data.symbol}. tx ${String(data.sig).slice(0, 14)}…`, '14F195');
     } catch (e) {
       addItem(player, 'gold-ingot', amt); // refund on failure
       world.chatManager.sendPlayerMessage(player, `❌ Cash out failed — gold refunded. (${e})`, 'FF5555');
@@ -1590,19 +1590,19 @@ startServer(world => {
     const wallet = isWalletAcct(player);
     const token = tokenOf.get(player);
     let usdc: number | null = null, dailyLeft: number | null = null;
-    let symbol = 'USDC', rate = 100000, minGold = 50000, treasury: string | null = null, mint: string | null = null, decimals = 6;
+    let symbol = 'USDC', rate = 100000, minGold = 50000, treasury: string | null = null, mint: string | null = null, decimals = 6, network = 'devnet';
     try {
       cubitInfoCache ??= await (await fetch(`${CUBIT_BACKEND}/api/cubit/info`)).json();
       const info = cubitInfoCache;
       symbol = info.symbol ?? symbol; rate = info.rate ?? rate; minGold = info.minGold ?? minGold;
-      treasury = info.treasury ?? null; mint = info.mint ?? null; decimals = info.decimals ?? decimals;
+      treasury = info.treasury ?? null; mint = info.mint ?? null; decimals = info.decimals ?? decimals; network = info.network ?? network;
       if (token && wallet) {
         const bal: any = await (await fetch(`${CUBIT_BACKEND}/api/cubit/balance`, { headers: { Authorization: `Bearer ${token}` } })).json();
         usdc = bal.reward ?? null; dailyLeft = bal.dailyLeft ?? null;
       }
     } catch {}
     try {
-      player.ui.sendData({ type: 'wallet', open: true, wallet, gold: goldOf(player), usdc, dailyLeft, symbol, rate, minGold, treasury, mint, decimals });
+      player.ui.sendData({ type: 'wallet', open: true, wallet, gold: goldOf(player), usdc, dailyLeft, symbol, rate, minGold, treasury, mint, decimals, network });
     } catch {}
   }
   function closeWalletPanel(player: any) { if (!walletOpen.has(player)) return; walletOpen.delete(player); try { player.ui.sendData({ type: 'wallet', open: false }); player.ui.lockPointer(true); } catch {} }

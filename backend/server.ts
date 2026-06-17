@@ -179,7 +179,8 @@ Bun.serve({
     }
 
     if (pathname === '/api/cubit/info') {
-      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network: 'devnet', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
+      const network = (process.env.CUBIT_RPC ?? '').includes('mainnet') ? 'mainnet-beta' : 'devnet';
+      return json({ enabled: solanaEnabled, mint: mintAddress(), treasury: treasuryAddress(), network, faucet: process.env.FAUCET_ENABLED === 'true', symbol: REWARD_SYMBOL, decimals: Number(process.env.REWARD_DECIMALS ?? 9), rate: REWARD_RATE, minGold: REWARD_MIN_GOLD, dailyCap: REWARD_DAILY_CAP });
     }
     if (pathname === '/api/cubit/balance') {
       const username = verifyToken(bearer(req));
