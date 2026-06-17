@@ -744,7 +744,9 @@ startServer(world => {
   /* --- Hostile Wumpus mobs ----------------------------------------- */
   const mobHp = new Map<Entity, number>();
   const mobBars = new Map<Entity, SceneUI>();
+  const bossMobs = new Set<Entity>(); // the Wumpus King — tanky, big rewards
   const MOB_MAX_HP = 100;
+  const BOSS_HP = 800;
 
   function spawnMob(at: { x: number; z: number }) {
     const y = heightAt(at.x, at.z) + 1;
@@ -773,11 +775,27 @@ startServer(world => {
     if (dir) { try { mob.applyImpulse({ x: dir.x * 6, y: 3, z: dir.z * 6 }); } catch {} }
     if (left <= 0) { killMob(mob, byPlayer); return; }
     mobHp.set(mob, left);
-    try { mobBars.get(mob)?.setState({ pct: Math.round((left / MOB_MAX_HP) * 100) }); } catch {}
+    const max = bossMobs.has(mob) ? BOSS_HP : MOB_MAX_HP;
+    try { mobBars.get(mob)?.setState({ pct: Math.round((left / max) * 100) }); } catch {}
+  }
+
+  // The Wumpus King: a big, tanky boss that drops a fortune. Only one alive at a time.
+  function spawnBoss(at: { x: number; z: number }) {
+    const y = heightAt(at.x, at.z) + 1;
+    const mob = new Entity({ name: 'Wumpus King', modelUri: 'models/npcs/wumpus.gltf', modelScale: 1.7,
+      modelAnimations: [{ name: 'idle', loopMode: EntityModelAnimationLoopMode.LOOP, play: true }], controller: new SimpleEntityController() });
+    mob.spawn(world, { x: at.x + 0.5, y, z: at.z + 0.5 });
+    try { mob.setTintColor({ r: 255, g: 90, b: 90 }); } catch {}
+    mobHp.set(mob, BOSS_HP); bossMobs.add(mob);
+    try { const bar = new SceneUI({ templateId: 'mob-health', attachedToEntity: mob, offset: { x: 0, y: 2.4, z: 0 }, state: { pct: 100 }, viewDistance: 80 }); bar.load(world); mobBars.set(mob, bar); } catch {}
+    players.forEach(p => { try { p.ui.sendData({ type: 'toast', text: '👑 A Wumpus King has appeared!' }); } catch {} world.chatManager.sendPlayerMessage(p, '👑 A Wumpus King has appeared somewhere in the world — hunt it for a huge reward!', 'FF5555'); });
+    return mob;
   }
 
   for (let i = 0; i < MOB_COUNT && openLand.length; i++) spawnMob(pick(openLand));
-  console.log(`[world] mobs: ${mobHp.size}`);
+  if (openLand.length) spawnBoss(pick(openLand));
+  console.log(`[world] mobs: ${mobHp.size} (+1 boss)`);
+  setInterval(() => { if (bossMobs.size === 0 && openLand.length) spawnBoss(pick(openLand)); }, 90000); // respawn boss ~90s after death
 
   function nearestPlayerEntity(pos: { x: number; y: number; z: number }, maxDist: number): PlayerEntity | null {
     let best: PlayerEntity | null = null;
@@ -813,17 +831,23 @@ startServer(world => {
   }, 8000);
 
   function killMob(mob: Entity, byPlayer: any) {
-    mobHp.delete(mob);
+    const isBoss = bossMobs.has(mob);
+    mobHp.delete(mob); bossMobs.delete(mob);
     try { mobBars.get(mob)?.unload(); } catch {}
     mobBars.delete(mob);
     try { mob.despawn(); } catch {}
     new Audio({ uri: 'audio/sfx/entity/spider/spider-death.mp3', volume: 0.5 }).play(world);
-    // Drop loot straight into the killer's inventory.
     if (byPlayer) {
-      const loot = pick(['bone', 'gold-ingot', 'cookie']);
-      addItem(byPlayer, loot);
-      world.chatManager.sendPlayerMessage(byPlayer, `⚔️ Wumpus defeated! Looted ${loot}.`, 'FF8800');
-      addXp(byPlayer, 20); bumpStat(byPlayer, 'kill');
+      if (isBoss) { // 👑 jackpot
+        addItem(byPlayer, 'gold-ingot', 200); addItem(byPlayer, 'diamond', 2); addXp(byPlayer, 100); bumpStat(byPlayer, 'kill');
+        toast(byPlayer, '👑 Wumpus King slain! +200🪙 +2💎');
+        players.forEach(p => { try { world.chatManager.sendPlayerMessage(p, `👑 ${accountOf.get(byPlayer) ?? 'A hunter'} slayed the Wumpus King! (+200 gold, +2 diamond)`, 'FFD700'); } catch {} });
+      } else {
+        const loot = pick(['bone', 'gold-ingot', 'cookie']);
+        addItem(byPlayer, loot);
+        world.chatManager.sendPlayerMessage(byPlayer, `⚔️ Wumpus defeated! Looted ${loot}.`, 'FF8800');
+        addXp(byPlayer, 20); bumpStat(byPlayer, 'kill');
+      }
     }
   }
 
