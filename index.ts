@@ -1469,6 +1469,7 @@ startServer(world => {
           const pe2 = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
           if (pe2) (inFlatland(pe2.position.x, pe2.position.z) ? exitFlatland : enterFlatland)(player);
         }
+        if (data?.type === 'open-wallet') { if (menuOpen.get(player) === 'wallet') closeMenu(player); else openMenu(player, 'wallet'); }
       });
     } catch (e) { console.warn('ui hook error', e); }
 
@@ -1779,6 +1780,7 @@ startServer(world => {
   function sendBag(player: any) {
     const groups: Record<string, { name: string; count: number; emoji: string }[]> = {};
     for (const [name, count] of getInv(player)) {
+      if (name === 'gold-ingot') continue; // coin is the currency (shown separately), not a bag item
       const cat = itemCategory(name);
       (groups[cat] ??= []).push({ name, count, emoji: ITEM_EMOJI[name] ?? '📦' });
     }

@@ -11,6 +11,7 @@
 
   <div id="objective" class="panel"><span class="k">WASD</span>move<span class="k">Space</span>jump<span class="k">Shift</span>run<span class="k">LMB</span>mine<span class="k">RMB</span>place<span class="k">1-9</span>hotbar<span class="k">E</span>vehicle<span class="k">Q</span>gun<span class="k">F</span>eat<span class="k">X</span>fish<span class="k">V</span>craft<span class="k">B</span>bag</div>
   <div id="flatBtn" title="Go to the Flatland build world (or /build)">🏗️ Flatland</div>
+  <div id="walletBtn" title="Open your wallet — cash out gold to USDC">💰 Wallet</div>
 
   <div id="health" class="panel">
     <span id="hp-label">❤️ 100</span>
@@ -263,6 +264,7 @@
   });
   document.getElementById('auth-guest').addEventListener('click', () => hytopia.sendData({ type: 'auth', mode: 'guest' }));
   document.getElementById('flatBtn').addEventListener('click', () => hytopia.sendData({ type: 'toggle-flat' }));
+  document.getElementById('walletBtn').addEventListener('click', () => hytopia.sendData({ type: 'open-wallet' }));
   document.getElementById('bag-close').addEventListener('click', () => hytopia.sendData({ type: 'bag-close' }));
 
   // Floating mob health bars in 3D space.
@@ -304,6 +306,10 @@
     background: rgba(20,30,50,0.72); border: 1px solid rgba(110,200,255,0.5); border-radius: 9px; padding: 7px 12px;
     font-size: 13px; font-weight: 800; color: #cfe8ff; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
   #flatBtn:hover { background: rgba(40,65,100,0.9); border-color: #6bc1ff; }
+  #walletBtn { position: fixed; top: 80px; right: 14px; z-index: 50; pointer-events: auto; cursor: pointer; user-select: none;
+    background: rgba(18,42,32,0.75); border: 1px solid rgba(20,241,149,0.5); border-radius: 9px; padding: 7px 12px;
+    font-size: 13px; font-weight: 800; color: #c9ffe8; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+  #walletBtn:hover { background: rgba(24,70,52,0.92); border-color: #14F195; }
 
   #health { bottom: 20px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
   #hp-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; }
