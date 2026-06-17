@@ -25,6 +25,8 @@ if ! grep -q 'rel="icon"' index.html; then
 fi
 sed -i 's|"HYTOPIA"|"CUBIT"|g' public/manifest.json 2>/dev/null || true
 [ -f "$FAVICON" ] && cp "$FAVICON" public/favicon.png
+# Map the B key (the SDK client doesn't forward it by default) for the in-game Bag.
+grep -q "'KeyB'" src/input/InputManager.ts || sed -i "s|'KeyZ': 'z',|'KeyZ': 'z',\n  'KeyB': 'b',|" src/input/InputManager.ts
 
 # Clean install avoids npm's rollup optional-deps bug (stale cross-platform lock).
 echo "==> npm install (clean)…"

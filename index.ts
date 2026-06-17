@@ -1174,6 +1174,9 @@ startServer(world => {
     // Open/close the crafting Workbench (V) — works anywhere.
     if (input.v && !prev.v) { if (menuOpen.get(player) === 'workbench') closeMenu(player); else openMenu(player, 'workbench'); }
 
+    // Open/close the Bag (B) — full categorized inventory.
+    if (input.b && !prev.b) { if (bagOpen.has(player)) closeBag(player); else openBag(player); }
+
     // Fishing (X) — need a rod (any level) + bait, near water. Higher rod = faster + more rares.
     if (input.x && !prev.x && !fishing.has(player)) {
       const inv = getInv(player);
@@ -1609,8 +1612,31 @@ startServer(world => {
     shopOpen.delete(player);
     try { player.ui.sendData({ type: 'shop', open: false }); player.ui.lockPointer(true); } catch {}
   }
+  /* --- Bag (B): the full inventory, grouped by category. --- */
+  const bagOpen = new Set<any>();
+  const CAT_LABEL: Record<string, string> = { tools: '⛏️ Tools', resources: '📦 Resources & Loot', fish: '🐟 Fish', food: '🍎 Food', blocks: '🧱 Blocks & Props', misc: '✨ Misc' };
+  const itemCategory = (name: string): string => {
+    if (/^(axe|pickaxe)-/.test(name) || name.startsWith('fishing-rod') || name === 'bait') return 'tools';
+    if (/cooked/.test(name) || ['carrot', 'bread', 'cookie', 'golden-apple', 'melon', 'milk'].includes(name)) return 'food';
+    if (/(cod|salmon|puffer|clown|catfish|parrot|lion|sail|sword|angler)/.test(name)) return 'fish';
+    if (['coal-ore', 'iron-ore', 'gold-ore', 'iron-ingot', 'gold-ingot', 'gold-nugget', 'iron-nugget', 'stick', 'plank', 'bone', 'feather', 'oak-log', 'stone', 'sand', 'coal'].includes(name)) return 'resources';
+    if (isPlaceable(name)) return 'blocks';
+    return 'misc';
+  };
+  function sendBag(player: any) {
+    const groups: Record<string, { name: string; count: number; emoji: string }[]> = {};
+    for (const [name, count] of getInv(player)) {
+      const cat = itemCategory(name);
+      (groups[cat] ??= []).push({ name, count, emoji: ITEM_EMOJI[name] ?? '📦' });
+    }
+    player.ui.sendData({ type: 'bag', open: true, groups, labels: CAT_LABEL, gold: goldOf(player) });
+  }
+  function openBag(player: any) { bagOpen.add(player); try { player.ui.lockPointer(false); } catch {} sendBag(player); }
+  function closeBag(player: any) { if (!bagOpen.has(player)) return; bagOpen.delete(player); try { player.ui.sendData({ type: 'bag', open: false }); player.ui.lockPointer(true); } catch {} }
+
   // Handle button clicks sent from the shop UI.
   function handleShopUI(player: any, data: any) {
+    if (data?.type === 'bag-close') { closeBag(player); return; }
     if (!data || !data.type) return;
     if (data.type === 'buy' || data.type === 'sell') {
       const msg = data.type === 'buy' ? buyItem(player, data.item) : sellItem(player, data.item);

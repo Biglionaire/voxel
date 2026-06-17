@@ -9,7 +9,7 @@
     <div id="time-track"><div id="time-fill"></div></div>
   </div>
 
-  <div id="objective" class="panel"><span class="k">WASD</span>move<span class="k">Space</span>jump<span class="k">Shift</span>run<span class="k">LMB</span>mine<span class="k">RMB</span>place<span class="k">1-9</span>hotbar<span class="k">E</span>vehicle<span class="k">Q</span>gun<span class="k">F</span>eat<span class="k">X</span>fish<span class="k">V</span>craft</div>
+  <div id="objective" class="panel"><span class="k">WASD</span>move<span class="k">Space</span>jump<span class="k">Shift</span>run<span class="k">LMB</span>mine<span class="k">RMB</span>place<span class="k">1-9</span>hotbar<span class="k">E</span>vehicle<span class="k">Q</span>gun<span class="k">F</span>eat<span class="k">X</span>fish<span class="k">V</span>craft<span class="k">B</span>bag</div>
   <div id="flatBtn" title="Go to the Flatland build world (or /build)">🏗️ Flatland</div>
 
   <div id="health" class="panel">
@@ -56,6 +56,15 @@
     <div class="shop-tabs" id="shop-tabs"></div>
     <div class="shop-list" id="shop-list"></div>
     <div class="shop-foot">Press <b>R</b> or ✕ to close</div>
+  </div>
+</div>
+
+<!-- Bag: full categorized inventory -->
+<div id="bag">
+  <div class="bag-panel">
+    <div class="bag-head"><span>🎒 Bag</span><span id="bag-gold">🪙 0</span><button id="bag-close" type="button">✕</button></div>
+    <div id="bag-body"></div>
+    <div class="bag-foot">Press <b>B</b> or ✕ to close</div>
   </div>
 </div>
 
@@ -138,6 +147,22 @@
     if (data.type === 'toast' && data.text) showToast(data.text);
     if (data.type === 'zone') document.getElementById('flatBtn').textContent = data.flat ? '🏠 Exit Build' : '🏗️ Flatland';
 
+    if (data.type === 'bag') {
+      const bag = document.getElementById('bag');
+      if (!data.open) { bag.style.display = 'none'; return; }
+      document.getElementById('bag-gold').textContent = '🪙 ' + (data.gold ?? 0);
+      const body = document.getElementById('bag-body'); body.innerHTML = ''; let any = false;
+      ['tools', 'resources', 'fish', 'food', 'blocks', 'misc'].forEach(cat => {
+        const items = (data.groups || {})[cat]; if (!items || !items.length) return; any = true;
+        const lab = document.createElement('div'); lab.className = 'bag-cat'; lab.textContent = (data.labels || {})[cat] || cat; body.appendChild(lab);
+        const grid = document.createElement('div'); grid.className = 'bag-grid';
+        items.forEach(it => { const c = document.createElement('div'); c.className = 'bag-item'; c.title = it.name; c.innerHTML = '<span class="emoji">' + it.emoji + '</span><span class="count">' + it.count + '</span>'; grid.appendChild(c); });
+        body.appendChild(grid);
+      });
+      if (!any) body.innerHTML = '<div style="opacity:.6;text-align:center;padding:24px">Your bag is empty.</div>';
+      bag.style.display = 'flex';
+    }
+
     if (data.type === 'building') {
       const p = document.getElementById('building-prompt');
       p.textContent = data.label ? (data.label + (data.shop ? ' — press R to trade' : '')) : '';
@@ -218,6 +243,7 @@
   });
   document.getElementById('auth-guest').addEventListener('click', () => hytopia.sendData({ type: 'auth', mode: 'guest' }));
   document.getElementById('flatBtn').addEventListener('click', () => hytopia.sendData({ type: 'toggle-flat' }));
+  document.getElementById('bag-close').addEventListener('click', () => hytopia.sendData({ type: 'bag-close' }));
 
   // Floating mob health bars in 3D space.
   if (hytopia.registerSceneUITemplate) {
@@ -288,6 +314,17 @@
   #building-prompt { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); border-radius: 8px; padding: 6px 14px; font-size: 14px; font-weight: 700; opacity: 0; transition: opacity 0.2s ease; text-shadow: 1px 1px 2px #000; }
 
   /* Marketplace modal */
+  #bag { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); pointer-events: auto; font-family: 'Inter', system-ui, sans-serif; color: #fff; z-index: 51; }
+  .bag-panel { width: min(620px, 92vw); max-height: 82vh; background: linear-gradient(160deg, #1c2740, #121826); border: 1px solid rgba(255,255,255,0.18); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow: hidden; display: flex; flex-direction: column; }
+  .bag-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; font-size: 18px; font-weight: 800; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); }
+  #bag-close { background: rgba(255,255,255,0.1); border: none; color: #fff; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+  #bag-close:hover { background: rgba(255,80,80,0.6); }
+  #bag-body { padding: 12px 16px; overflow-y: auto; }
+  .bag-cat { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.6); margin: 12px 0 7px; font-weight: 700; }
+  .bag-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bag-item { width: 56px; height: 56px; border-radius: 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.14); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+  .bag-item .emoji { font-size: 24px; } .bag-item .count { position: absolute; bottom: 2px; right: 5px; font-size: 11px; font-weight: 800; text-shadow: 1px 1px 2px #000; }
+  .bag-foot { padding: 9px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.55); border-top: 1px solid rgba(255,255,255,0.1); }
   #shop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); pointer-events: auto; font-family: 'Inter', system-ui, sans-serif; color: #fff; z-index: 50; }
   .shop-panel { width: min(640px, 92vw); max-height: 80vh; background: linear-gradient(160deg, #1c2740, #121826); border: 1px solid rgba(255,255,255,0.18); border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow: hidden; display: flex; flex-direction: column; }
   .shop-head { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); }
