@@ -15,6 +15,7 @@
   <div id="health" class="panel">
     <span id="hp-label">❤️ 100</span>
     <div id="hp-track"><div id="hp-fill"></div></div>
+    <div id="xp-row"><span id="lvl-badge">Lv 1</span><div id="xp-track"><div id="xp-fill"></div></div></div>
   </div>
 
   <div id="gun-indicator" class="panel">🔫 AK-47</div>
@@ -113,6 +114,10 @@
       hpFill.style.width = pct + '%';
       hpFill.style.background = pct > 50 ? 'linear-gradient(90deg,#4caf50,#8bc34a)'
         : pct > 25 ? 'linear-gradient(90deg,#ff9800,#ffc107)' : 'linear-gradient(90deg,#e53935,#ff5252)';
+      if (typeof data.level === 'number') {
+        document.getElementById('lvl-badge').textContent = 'Lv ' + data.level;
+        document.getElementById('xp-fill').style.width = (data.xpNext ? Math.max(0, Math.min(100, (data.xp / data.xpNext) * 100)) : 0) + '%';
+      }
 
       invEl.innerHTML = '';
       (data.items || []).forEach((it, i) => {
@@ -293,6 +298,10 @@
   #health { bottom: 20px; left: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
   #hp-track { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; }
   #hp-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#4caf50,#8bc34a); transition: width 0.25s ease, background 0.25s ease; }
+  #xp-row { display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+  #lvl-badge { font-size: 11px; font-weight: 800; color: #ffe08a; min-width: 30px; }
+  #xp-track { flex: 1; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.16); overflow: hidden; }
+  #xp-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#ffd56b,#ff9f43); transition: width 0.25s ease; }
 
   #gun-indicator { display: none; bottom: 20px; right: 16px; color: #ffcc33; }
 

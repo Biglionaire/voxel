@@ -579,6 +579,7 @@ startServer(world => {
   /* --- Per-player state -------------------------------------------- */
   const players = new Set<any>();
   const hp = new Map<any, number>();
+  const xp = new Map<any, number>(); // total XP per player (drives level)
   const inventory = new Map<any, Map<string, number>>();
   const lastInput = new Map<any, Record<string, boolean>>();
   const lastAttack = new Map<any, number>();
@@ -605,11 +606,30 @@ startServer(world => {
     const inv = getInv(player);
     const items = [...inv.entries()].map(([name, count]) => ({ name, count, emoji: ITEM_EMOJI[name] ?? '📦', placeable: isPlaceable(name) }));
     const sel = Math.min(selectedSlot.get(player) ?? 0, Math.max(0, items.length - 1));
-    player.ui.sendData({ type: 'state', hp: hp.get(player) ?? MAX_HP, maxHp: MAX_HP, items, selected: sel, collected: [...inv.values()].reduce((a, b) => a + b, 0), total: TOTAL_ITEMS });
+    const x = xp.get(player) ?? 0, L = levelFromXp(x);
+    player.ui.sendData({ type: 'state', hp: hp.get(player) ?? MAX_HP, maxHp: MAX_HP, items, selected: sel, collected: [...inv.values()].reduce((a, b) => a + b, 0), total: TOTAL_ITEMS, level: L, xp: x - xpForLevel(L), xpNext: xpForLevel(L + 1) - xpForLevel(L) });
   }
 
   // A visible on-screen toast (UI overlay) — reliable even if the chat panel is hidden.
   function toast(player: any, text: string) { try { player.ui.sendData({ type: 'toast', text }); } catch {} }
+
+  /* --- Player XP & levels: earn XP from mining, fishing, crafting & combat.
+   * Cumulative XP to reach level L = 50*L*(L-1) (L1=0, L2=100, L3=300, L4=600…). */
+  const xpForLevel = (L: number) => 50 * L * (L - 1);
+  const levelFromXp = (x: number) => Math.floor((1 + Math.sqrt(1 + 0.08 * Math.max(0, x))) / 2);
+  function addXp(player: any, amount: number) {
+    const before = xp.get(player) ?? 0, after = before + amount;
+    xp.set(player, after);
+    const lb = levelFromXp(before), la = levelFromXp(after);
+    if (la > lb) {
+      const reward = la * 5;
+      addItem(player, 'gold-ingot', reward);
+      toast(player, `⭐ Level ${la}!  +${reward} 🪙`);
+      try { world.chatManager.sendPlayerMessage(player, `⭐ Level up! You are now level ${la} (+${reward} gold).`, 'FFD700'); } catch {}
+      try { new Audio({ uri: 'audio/sfx/ui/inventory-place-item.mp3', volume: 0.6 }).play(world); } catch {}
+    }
+    sendHud(player);
+  }
 
   // The item name in the currently selected hotbar slot (or null).
   function selectedItemName(player: any): string | null {
@@ -764,6 +784,7 @@ startServer(world => {
       const loot = pick(['bone', 'gold-ingot', 'cookie']);
       addItem(byPlayer, loot);
       world.chatManager.sendPlayerMessage(byPlayer, `⚔️ Wumpus defeated! Looted ${loot}.`, 'FF8800');
+      addXp(byPlayer, 20);
     }
   }
 
@@ -1150,6 +1171,7 @@ startServer(world => {
     nodeMeta.delete(target);
     try { target.despawn(); } catch {}
     try { new Audio({ uri: 'audio/sfx/ui/inventory-grab-item.mp3', volume: 0.5 }).play(world); } catch {}
+    addXp(player, kind === 'tree' ? 5 : (meta?.ore ? 15 : 8));
     if (meta) setTimeout(() => respawnNode(meta), 180000); // regrows after 3 minutes
   }
 
@@ -1218,6 +1240,7 @@ startServer(world => {
               : roll < rareChance + 0.4 ? 'salmon-raw' : 'cod-raw';
             addItem(player, fish);
             fishStrike(player, pe, wx, wz, fish); // the fish leaps from the water with a splash
+            addXp(player, 10);
             world.chatManager.sendPlayerMessage(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`, '88FF88');
             toast(player, `🎣 Caught a ${fish.replace(/-/g, ' ')}!`);
           }, delay);
@@ -1561,6 +1584,7 @@ startServer(world => {
     setTimeout(() => {
       crafting.delete(player);
       addItem(player, key, r.out);
+      addXp(player, Math.round(r.time / 200)); // 15 / 25 / 50 XP by craft complexity
       toast(player, `✅ Crafted ${r.label}`);
       try { new Audio({ uri: 'audio/sfx/ui/inventory-place-item.mp3', volume: 0.5 }).play(world); } catch {}
       if (menuOpen.get(player) === 'workbench') sendMenu(player, 'workbench');
@@ -1686,7 +1710,7 @@ startServer(world => {
           if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
             const inv = getInv(player); inv.clear();
             for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
-            if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp);
+            if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp);
             world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
           }
           applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0));
@@ -1717,7 +1741,7 @@ startServer(world => {
         if (prof?.data?.inventory && Object.keys(prof.data.inventory).length) {
           const inv = getInv(player); inv.clear();
           for (const [k, v] of Object.entries(prof.data.inventory)) inv.set(k, Number(v));
-          if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp);
+          if (typeof prof.data.hp === 'number') hp.set(player, prof.data.hp); if (typeof prof.data.xp === 'number') xp.set(player, prof.data.xp);
           world.chatManager.sendPlayerMessage(player, '💾 Progress restored.', '88FF88');
         }
         applyHair(player, pe, Number(prof?.data?.cosmetic?.hair ?? 0)); // restore avatar look
@@ -1745,7 +1769,7 @@ startServer(world => {
     try {
       await fetch(`${CUBIT_BACKEND}/api/profile`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP, cosmetic: cosmeticOf.get(player) ?? { hair: 0 } } }),
+        body: JSON.stringify({ data: { inventory, hp: hp.get(player) ?? MAX_HP, xp: xp.get(player) ?? 0, cosmetic: cosmeticOf.get(player) ?? { hair: 0 } } }),
       });
     } catch {}
   }
