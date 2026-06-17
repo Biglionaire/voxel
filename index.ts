@@ -1484,7 +1484,7 @@ startServer(world => {
     world.chatManager.sendPlayerMessage(player, '1-9 hotbar · E vehicle · F eat · R marketplace (anywhere)');
     world.chatManager.sendPlayerMessage(player, '🎣 Buy a fishing-rod, stand near water, press X to fish · C to cook fish');
     world.chatManager.sendPlayerMessage(player, '🏗️ The wild is protected — type /build to enter the Flatland and build freely (/home to return).');
-    world.chatManager.sendPlayerMessage(player, 'Explore the villages! Commands: /build /home /heal /give /time');
+    world.chatManager.sendPlayerMessage(player, '💵 Earn gold → /wallet to cash out to USDC (Solana). Commands: /wallet /cashout /quests /build /home /hair /heal /give /time');
   });
 
   world.on(PlayerEvent.LEFT_WORLD, ({ player }) => {
@@ -1538,11 +1538,12 @@ startServer(world => {
   });
   // Cash out in-game gold → $CUBIT on-chain (wallet accounts only). The game debits
   // its own gold, then the backend treasury sends the tokens — no caveat, works live.
-  world.chatManager.registerCommand('/cashout', async (player, args) => {
-    const wallet = accountOf.get(player);
-    if (!wallet || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) { world.chatManager.sendPlayerMessage(player, '💠 Connect a Solana wallet (on cubit.cash) to cash out gold → $CUBIT.', 'FF8844'); return; }
-    const amt = Math.floor(Number(args[0] ?? '0'));
-    if (!(amt > 0)) { world.chatManager.sendPlayerMessage(player, 'Usage: /cashout <gold amount>  (1 gold → 1 $CUBIT)', 'CCCCCC'); return; }
+  const isWalletAcct = (player: any) => { const w = accountOf.get(player); return w && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w) ? w : null; };
+  async function doCashout(player: any, amt: number) {
+    const wallet = isWalletAcct(player);
+    if (!wallet) { world.chatManager.sendPlayerMessage(player, '💠 Connect a Solana wallet (on cubit.cash) to cash out.', 'FF8844'); return; }
+    amt = Math.floor(amt);
+    if (!(amt > 0)) { world.chatManager.sendPlayerMessage(player, 'Usage: /cashout <gold amount>', 'CCCCCC'); return; }
     if (goldOf(player) < amt) { world.chatManager.sendPlayerMessage(player, `Not enough gold (have ${goldOf(player)}).`, 'FF8844'); return; }
     const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - amt); if ((inv.get('gold-ingot') ?? 0) <= 0) inv.delete('gold-ingot'); sendHud(player);
     await saveProfile(player);
@@ -1554,12 +1555,15 @@ startServer(world => {
       const data: any = await res.json();
       if (!data.ok) throw new Error(data.error || 'failed');
       toast(player, `✅ Cashed out ${data.tokens} ${data.symbol}!`);
-      world.chatManager.sendPlayerMessage(player, `✅ Cashed out ${amt} gold → ${data.tokens} ${data.symbol} (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
+      world.chatManager.sendPlayerMessage(player, `✅ ${amt} gold → ${data.tokens} ${data.symbol} (devnet). tx ${String(data.sig).slice(0, 14)}…`, '14F195');
     } catch (e) {
       addItem(player, 'gold-ingot', amt); // refund on failure
       world.chatManager.sendPlayerMessage(player, `❌ Cash out failed — gold refunded. (${e})`, 'FF5555');
     }
-  });
+    if (menuOpen.get(player) === 'wallet') sendMenu(player, 'wallet');
+  }
+  world.chatManager.registerCommand('/cashout', (player, args) => doCashout(player, Number(args[0] ?? '0')));
+  world.chatManager.registerCommand('/wallet', player => { if (menuOpen.get(player) === 'wallet') closeMenu(player); else openMenu(player, 'wallet'); });
   world.chatManager.registerCommand('/hair', (player, args) => {
     const pe = world.entityManager.getPlayerEntitiesByPlayer(player)[0] as PlayerEntity | undefined;
     if (!pe) return;
@@ -1702,6 +1706,17 @@ startServer(world => {
         return { label: `${r.label} — ${cost}${can ? '' : ' ❌'}`, action: `craft:${k}` };
       });
     }
+    else if (kind === 'wallet') {
+      title = '💰 Wallet — cash out';
+      const w = accountOf.get(player), isW = w && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w);
+      const g = goldOf(player);
+      if (!isW) buttons = [{ label: '🔗 Connect a Solana wallet at cubit.cash to cash out', action: 'noop' }];
+      else {
+        buttons = [{ label: `🪙 Gold: ${g}  ·  100,000 gold = 1 USDC`, action: 'noop' }];
+        buttons.push({ label: g >= 50000 ? '💵 Cash out 50,000 gold → 0.5 USDC' : '🔒 Need 50,000 gold (min) to cash out', action: g >= 50000 ? 'cashout:50000' : 'noop' });
+        if (g >= 100000) buttons.push({ label: '💵 Cash out 100,000 gold → 1 USDC (daily max)', action: 'cashout:100000' });
+      }
+    }
     else { title = '🍺 Tavern'; buttons = [{ label: '🍳 Cook all raw fish', action: 'cook-all' }, { label: '🍺 Order a meal (+40 HP, 3🪙)', action: 'meal' }, { label: '🛏️ Rest (restore HP, free)', action: 'rest' }]; }
     player.ui.sendData({ type: 'menu', open: true, kind, title, gold: goldOf(player), hp: hp.get(player) ?? MAX_HP, buttons });
   }
@@ -1710,7 +1725,9 @@ startServer(world => {
   function handleMenuAction(player: any, action: string) {
     const kind = menuOpen.get(player);
     if (action === 'close') { closeMenu(player); return; }
+    if (action === 'noop') return;
     if (action.startsWith('craft:')) { craftItem(player, action.slice(6)); return; }
+    if (action.startsWith('cashout:')) { doCashout(player, Number(action.slice(8))); return; }
     if (action === 'heal' || action === 'rest') { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '❤️ Fully healed.', '66FF66'); }
     else if (action === 'buy-apple') { world.chatManager.sendPlayerMessage(player, buyItem(player, 'golden-apple'), '88FF88'); }
     else if (action === 'meal') { if (goldOf(player) >= 3) { const inv = getInv(player); inv.set('gold-ingot', goldOf(player) - 3); hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, '🍺 Enjoyed a hearty meal! (+HP)', '66FF66'); } else world.chatManager.sendPlayerMessage(player, 'Need 3 🪙.', 'FF8844'); }
@@ -1780,7 +1797,7 @@ startServer(world => {
         playerBuilding.set(player, b ?? null);
         if (b?.type === 'clinic') openMenu(player, 'clinic');
         else if (b?.type === 'tavern') openMenu(player, 'tavern');
-        else if (menuOpen.has(player) && menuOpen.get(player) !== 'workbench') closeMenu(player);
+        else if (menuOpen.has(player) && !['workbench', 'wallet'].includes(menuOpen.get(player)!)) closeMenu(player);
       }
     }
   }, 1000);
