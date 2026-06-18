@@ -130,7 +130,8 @@ const PROPS: Record<Biome, { uri: string; collide: boolean; chance: number }[]> 
   ocean: [],
 };
 
-const COLLECTIBLES = ['carrot', 'golden-apple', 'bread', 'cookie', 'gold-ingot', 'melon', 'bone', 'book', 'compass', 'clock'];
+// NOTE: never put 'gold-ingot' (the currency) here — these spawn free in the world.
+const COLLECTIBLES = ['carrot', 'bread', 'cookie', 'melon', 'bone', 'book', 'compass', 'clock'];
 const ITEM_EMOJI: Record<string, string> = {
   carrot: '🥕', 'golden-apple': '🍎', bread: '🍞', cookie: '🍪', 'gold-ingot': '🪙',
   melon: '🍈', bone: '🦴', book: '📖', compass: '🧭', clock: '🕐',
@@ -1493,7 +1494,7 @@ startServer(world => {
     world.chatManager.sendPlayerMessage(player, '1-9 hotbar · E vehicle · F eat · R marketplace (anywhere)');
     world.chatManager.sendPlayerMessage(player, '🎣 Buy a fishing-rod, stand near water, press X to fish · C to cook fish');
     world.chatManager.sendPlayerMessage(player, '🏗️ The wild is protected — type /build to enter the Flatland and build freely (/home to return).');
-    world.chatManager.sendPlayerMessage(player, '💵 Earn gold → /wallet to cash out to USDC (Solana). Commands: /wallet /cashout /quests /build /home /hair /heal /give /time');
+    world.chatManager.sendPlayerMessage(player, '💵 Earn gold → /wallet to cash out to USDC (Solana). Commands: /wallet /cashout /quests /build /home /hair /heal /time');
   });
 
   world.on(PlayerEvent.LEFT_WORLD, ({ player }) => {
@@ -1536,7 +1537,8 @@ startServer(world => {
   };
   world.chatManager.registerCommand('/home', exitFlatland);
   world.chatManager.registerCommand('/heal', player => { hp.set(player, MAX_HP); sendHud(player); world.chatManager.sendPlayerMessage(player, 'Healed to full.', '66FF66'); });
-  world.chatManager.registerCommand('/give', player => { COLLECTIBLES.forEach(n => addItem(player, n, 1)); world.chatManager.sendPlayerMessage(player, 'Gave one of each item.', 'FFE066'); });
+  // (removed — it was a debug faucet open to every player: it minted free items
+  //  incl. sellable loot → gold → USDC cash-out. Drained the treasury via Sybil accounts.)
   world.chatManager.registerCommand('/quests', player => {
     const s = stats.get(player) ?? {}, cl = claimed.get(player) ?? new Set();
     world.chatManager.sendPlayerMessage(player, `🏆 Level ${levelFromXp(xp.get(player) ?? 0)} · Achievements:`, 'FFD700');

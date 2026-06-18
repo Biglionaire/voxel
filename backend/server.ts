@@ -74,8 +74,13 @@ const REWARD_SYMBOL = process.env.REWARD_SYMBOL ?? 'USDC';
 const REWARD_RATE = Number(process.env.REWARD_RATE ?? 100000);      // gold per 1 reward token
 const REWARD_MIN_GOLD = Number(process.env.REWARD_MIN_GOLD ?? 50000); // min gold per withdraw
 const REWARD_DAILY_CAP = Number(process.env.REWARD_DAILY_CAP ?? 1);  // max reward tokens / 24h / account
+const REWARD_GLOBAL_DAILY_CAP = Number(process.env.REWARD_GLOBAL_DAILY_CAP ?? 10); // max tokens / 24h ACROSS ALL accounts — Sybil/treasury-drain backstop
 const withdrawnToday = (username: string): number => {
   const row = db.query('SELECT COALESCE(SUM(tokens),0) AS t FROM withdrawals WHERE username = ? AND ts > ?').get(username, Date.now() - 86400000) as any;
+  return Number(row?.t ?? 0);
+};
+const globalWithdrawnToday = (): number => {
+  const row = db.query('SELECT COALESCE(SUM(tokens),0) AS t FROM withdrawals WHERE ts > ?').get(Date.now() - 86400000) as any;
   return Number(row?.t ?? 0);
 };
 
@@ -206,6 +211,7 @@ Bun.serve({
       if (goldAmt < REWARD_MIN_GOLD) return json({ error: `Minimum withdraw is ${REWARD_MIN_GOLD.toLocaleString()} gold.` }, 400);
       const tokens = goldAmt / REWARD_RATE;
       if (withdrawnToday(username) + tokens > REWARD_DAILY_CAP) return json({ error: `Daily cap is ${REWARD_DAILY_CAP} ${REWARD_SYMBOL} per account.` }, 400);
+      if (globalWithdrawnToday() + tokens > REWARD_GLOBAL_DAILY_CAP) return json({ error: 'Daily reward pool reached — try again tomorrow.', code: 'global' }, 429);
       const pd = getProfileData(username); if (!pd.inventory) pd.inventory = {};
       const gold = pd.inventory['gold-ingot'] ?? 0;
       if (gold < goldAmt) return json({ error: `Not enough gold (you have ${gold}).` }, 400);
@@ -273,6 +279,7 @@ Bun.serve({
       if (g < REWARD_MIN_GOLD) return json({ error: `min ${REWARD_MIN_GOLD} gold`, code: 'min' }, 400);
       const tokens = g / REWARD_RATE;
       if (withdrawnToday(wallet) + tokens > REWARD_DAILY_CAP) return json({ error: `daily cap ${REWARD_DAILY_CAP} ${REWARD_SYMBOL}`, code: 'cap' }, 400);
+      if (globalWithdrawnToday() + tokens > REWARD_GLOBAL_DAILY_CAP) return json({ error: 'global daily pool reached', code: 'global' }, 429);
       try {
         const sig = await sendCubit(wallet, tokens);
         db.run('INSERT INTO withdrawals (username, tokens, ts) VALUES (?, ?, ?)', [wallet, tokens, Date.now()]);
